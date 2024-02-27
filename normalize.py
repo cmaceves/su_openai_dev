@@ -35,7 +35,6 @@ def get_normalizer(curies: Sequence[str]):
             print('Request to the Node Normalizer failed. Retrying in 5 seconds...')
             time.sleep(5)
         break
-    print(result)
     normalizer = {}
     all_norm = []
     for curie, entry in result.items():
