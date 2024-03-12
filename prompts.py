@@ -5,6 +5,73 @@ import pandas as pd
 from openai import OpenAI
 client = OpenAI()
 
+def extract_predicates(paragraph, entities, predicates):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           Extract semantic triplets from the given paragraph. Each triplet should consist of a subject, a predicate, and an object. A list of controlled vocabulary predicates will be provided and the predicate must be selected from the provided list. A list of entities that are likely to be subjects and objects will be provided, however triplets may include subjects and objects not given in the input. If no triplets are found, please return "no triplets". Do not return any additional commentary.
+
+           Example Input:
+           Paragraph: NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. 
+           Predicates:caused by
+           symptoms of
+           blocks
+           treats
+           negatively regulates
+           stimulates
+           Entities:NSAIDs
+           ibuprofen
+        
+           Example Output:
+           NSAIDs - negatively regulates - cyclooxygenase enzymes
+           thromboxane A2 - stimulates - platelet aggregations
+           ibuprofen - negatively regulates - COX-1
+           ibuprofen - negatively regulates - COX-2
+           aspirin - negatively regulates - COX-1
+           aspirin - negatively regulates - COX-2
+           indomethacin - negatively regulates - COX-1
+           indomethacin - negatively regulates - COX-2
+           ibuprofen - treats - headaches
+           """},
+          {"role": "user", "content": "Paragraph:%s\nEntities:%s\nPredicates:%s"%(paragraph, entities, predicates)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+def test(paragraph, drug, disease):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           Given a paragraph of text, an input entitiy, and an output entity, please explain how the input entity is connected to the output entity. Do not return any additional commentary.
+
+           Example Input
+           Paragraph: Gastroesophageal reflux disease (GERD) or gastro-oesophageal reflux disease (GORD) is a chronic upper gastrointestinal disease in which stomach content persistently and regularly flows up into the esophagus, resulting in symptoms and/or complications. The most common symptoms of GERD in adults are an acidic taste in the mouth, regurgitation, and heartburn.[16] Less common symptoms include pain with swallowing/sore throat, increased salivation (also known as water brash), nausea,[17] chest pain, coughing, and globus sensation.[18] The acid reflux can induce asthma attack symptoms like shortness of breath, cough, and wheezing in those with underlying asthma.[18] Omeprazole is a selective and irreversible proton pump inhibitor. It suppresses stomach acid secretion by specific inhibition of the H+/K+-ATPase system found at the secretory surface of gastric parietal cells. Because this enzyme system is regarded as the acid (proton, or H+) pump within the gastric mucosa, omeprazole inhibits the final step of acid production.[50] Omeprazole also inhibits both basal and stimulated acid secretion irrespective of the stimulus[51] as it blocks the last step in acid secretion.[51] The drug binds non-competitively so it has a dose-dependent effect.[52] The inhibitory effect of omeprazole occurs within 1 hour after oral administration. The maximum effect occurs within 2 hours. The duration of inhibition is up to 72 hours. When omeprazole is stopped, baseline stomach acid secretory activity returns after 3 to 5 days. The inhibitory effect of omeprazole on acid secretion will plateau after 4 days of repeated daily dosing.[53]
+           Starting:Omeprazole
+           Ending:Gastroesophageal Reflux Disease 
+
+           Example Output:
+           Omeprazole supresses stomach acid secretion by inihibiting the H+/K+-ATPase system found on the secretary surface of gastic parietal cells. This inihibits the final step of acid production.
+           """},
+          {"role": "user", "content": "Paragraph:%s\nStarting:%s\nEnding:%s"%(paragraph, drug, disease)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
 def sentence_tense(sentence, pos):
     completion = client.chat.completions.create(
     model="gpt-3.5-turbo",
@@ -27,6 +94,28 @@ def sentence_tense(sentence, pos):
     response = str(completion.choices[0].message.content)
     return(response)
 
+def triplets(text, entities):
+    prompt=[
+          {"role": "system", "content": 
+           """
+           Task:
+           You will be given a paragraph, and a list of entities. Please extract all semantic triplets from the paragraph as they relate to the given entities. A semantic triplet consists of a subject, a predicate, and an object. The subject is the entity performing the action, the predicate is the action or relationship, and the object is the entity that undergoes the action. Either the object or the subject should be one of the given entities. Multiple triplets may appear in a single sentence. Seperate the subject, predicate, and object with "-" characters, and place each triplet on a newline. Do not return any additional commentary. If no triplets can be extracted, please return "no triplets".
+           Example Input 1:
+           Text: John goes to a crowded grocery store and buys an apple.
+           Entities: ["apple"]
+
+           Example Output 1:
+           John - buys - apple
+           """},
+          {"role": "user", "content": "Text:%s\nEntities:%s"%(text, entities)}
+      ]
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
 
 def triplicates(text):
     completion = client.chat.completions.create(
@@ -231,22 +320,47 @@ def entity_categorization(questions):
     resp = str(completion.choices[0].message.content)
     return(str(completion.choices[0].message.content))
 
-
-def entity_query(paragraph):
-    completion = client.chat.completions.create(
-      model="gpt-3.5-turbo",
-      messages=[
+def other_entity_query(paragraph, entity_string):
+    prompt = [
           {"role": "system", "content": 
           """
-          You are a helpful assistant used for entity extraction. Given a paragraph and a list of categories please return the biological or chemical entities in the paragraph in a Pythonic list form with no additional commentary.
+          You are a helpful assistant for entity extraction. Given a paragraph, and a list of entity categories with definitions, please return a Pythonic dictionary where each key is an entity contained in the paragraph and each associated value is its category. Do not return any additional commentary.
+          
+          Input Format:
+          Paragraph: Text sentences describing some biolgicial thing.
+          Entities:
+          Entity category 1:entity definition.
+          Entity category 2:entity definition.
+
+          Output Format:
+          {"Entity1": "category", "Entity2": "category"}
+          """},
+          {"role": "user", "content": "Paragraph:%s\nEntities:%s" %(paragraph, entity_string)}
+      ]
+
+    completion = client.chat.completions.create(
+      model="gpt-3.5-turbo",
+      messages=prompt)
+    return(str(completion.choices[0].message.content), prompt)
+
+
+
+def entity_query(paragraph):
+    prompt = [
+          {"role": "system", "content": 
+          """
+          You are a helpful assistant used for entity extraction. Given a paragraph and a list of categories please return the biological, medical, or chemical entities or processes in the paragraph in a Pythonic list form with no additional commentary.
           Output Format:
           ["Term1", "Term2", ...]
           
           """},
-          {"role": "user", "content": "What are the biological or chemical entities in the following paragraph: %s" %(paragraph)}
+          {"role": "user", "content": "What are the biological, medical, or chemical entities or processes in the following paragraph: %s" %(paragraph)}
       ]
-    )
-    return(str(completion.choices[0].message.content))
+
+    completion = client.chat.completions.create(
+      model="gpt-3.5-turbo",
+      messages=prompt)
+    return(str(completion.choices[0].message.content), prompt)
 
 
 def term_query(term_1, term_2):
