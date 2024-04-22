@@ -1,0 +1,4 @@
+.openairc
+*.swp
+__pycache__
+indication_paths.json

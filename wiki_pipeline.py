@@ -468,6 +468,16 @@ def main():
     name_lookup_url = "https://name-lookup.transltr.io/lookup"
     indication_json = "./indication_paths.json"
     literature_dir = "./wiki_text"
+
+    # Get indications file from DrugMechDB
+    if not os.path.exists(indication_json):
+        print("Downloading indications file...")
+        indication_url = "https://raw.githubusercontent.com/SuLab/DrugMechDB/main/indication_paths.json"
+        r = requests.get(indication_url, allow_redirects=True)
+        open(indication_json, 'wb').write(r.content)
+    else:
+        print("Found local indications file...")
+
     solution_names = parse_solutions(indication_json, solution_df)
     with open(entity_json, "r") as jfile:
         entity_data = json.load(jfile) 
@@ -505,6 +515,14 @@ def main():
         basename = solution_identifiers[0] + "_" + solution_identifiers[-1] + ".json"
         basename = basename.replace(" ","_")
         output_filename = os.path.join(literature_dir, basename)
+
+        if not os.path.exists(literature_dir):
+        # Create the directory
+            os.makedirs(literature_dir)
+            print(f"Directory '{literature_dir}' was created.")
+        else:
+            print(f"Directory '{literature_dir}' already exists.")
+
         #if os.path.isfile(output_filename):
         #    grade_grounding_step(solution_steps, output_filename)
         #    continue
