@@ -5,36 +5,204 @@ import pandas as pd
 from openai import OpenAI
 client = OpenAI()
 
+def synonym_context(word1, word2, paragraph):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           You will be given a paragraph, and word of interest, and a synonym for that word. Your job is to determine whether or not the synonym means the same thing as the word of interest in the context of the paragraph. If the word and the synonym mean the same thing in the context of the pargraph, return "yes" otherwise return "no". Don't return any additional commentary or formatting.
+           """},
+          {"role": "user", "content": "Paragraph:%s\nWord of interest:%s\nSynonym:%s"%(paragraph, word1, word2)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+def synonym_prompt(entity):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           You will be provided a biological entity, please return all synonyms foe that entity. Be as comprehensive and specific as possible. Return each synonym on a newline in the following format, with no additional commentary or formatting.
+           Output Format:
+           Synonym1
+           Synonym2
+           Synonym3
+           """},
+          {"role": "user", "content": "What are synonyms for %s?"%(entity)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+def test_prompt_2(mechanism, entity):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           You will be given a biological or chemical entity and the text it appears in. Certain entities contain more specific synonyms, please return all such synonyms. Be as comprehensive and specific as possible. Return each synonym on a newline in the following format, with no additional commentary or formatting.
+           Output Format:
+           Synonym1
+           Synonym2
+           Synonym3
+           """},
+          {"role": "user", "content": "Text:%sEntity:%s"%(mechanism, entity)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+def test_prompt(page, mechanism):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           You are trying to improve a description of a mechanism of action of a drug. To do so you must determine which Wikipedia database pages will provide relevant additional information. Given the title of a Wikipedia database page, and the known description mechanism of action, determine whether or not the Wikipedia database page can improve our knowledge. Please return your answer as either a "yes", meaning the page will provide relevant information or "no" meaning that the page will not provide relevant information. Do not return any additional commentary or formatting.
+           """},
+          {"role": "user", "content": "Wikipedia Database Page Title:%s\nMechanism:%s"%(page,mechanism)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+def summarize_add_info(text, mechanism):
+    prompt =[
+          {"role": "system", "content": 
+           """
+          Given a paragraph of text, and a mechansims by which a drug treats a disease, please summarize the paragraph of text while retaining all information possibly relevant to the mechanism.
+          """},
+          {"role": "user", "content": "Paragraph:%s\nMechanism:%s"%(text,mechanism)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+def clean_up_entities(entity):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           You will be given a biological or chemical entity and your job is to determine if the entity contains any sub-entities. All sub-entities must be biological or chemical entities. Please return sub-entities as a comma-seperated string with no leading white spaces, additional formatting or commentary.
+           Example Input:
+           Does 'G-coupled protein receptor' contain any sub-entites?
+           Example Output:
+           G-coupled protein,protein,receptor,G-coupled protein receptor
+           """},
+          {"role": "user", "content": "Does '%s' contain any sub-entities?"%(entity)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+def extract_mech_path(paragraph, drug, disease):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           Given a paragraph of information, a drug, and a disease state, please explain in paragraph form the mechanism of action through which the drug treats the disease. Use specific and complete biological and chemical terminology whenever possible. Supplement the given information if needed. Be as bioloigcally specific and detailed as possible and provided background explanations about the entities involved in the mechanism.
+           Additionally, please return a complete list of the bioloigical or chemical entities, responses, or terms, including sub-entities and sub-terms, that are a part of this mechanistic path seperated by commas.Be as comprehensive as possible. Please return the response in the format specified with no  additional commentary.
+
+          Example Input:
+          Paragraph:NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. It has been know to also treat inflammation.
+          Drug:ibuprofen
+          Disease:headaches
+
+          Example Output:
+          Mechanism:ibuprofen inhibits cyclooxygenase (COX) enzymes. Specifically, ibuprofen inhibits COX-1 and COX-2 enzymes. COX enzymes convert arachidonic acid to prostaglandin H2 (PGH2). PGH2 is converted to other prostaglandins, thromboxanes, and prostacyclins. Prostaglandins, thromboxanes, and prostacyclins are implicated in causing pain, inflammation, and fever. Thus, ibuprofen reduces prostaglandins to prevent pain associated with headaches.
+          Relevant Entities:ibuprofen,cyclooxygenase (COX) enzymes,enzymes,COX-1 enzyme,COX-2 enzyme,arachidonic acid,prostaglandin H2 (PGH2),H2,prostaglandin,prostaglandins,thromboxanes,prostacyclins,inflammation,fever,pain
+          """},
+          {"role": "user", "content": "Paragraph:%s\nDrug:%s\nDisease:%s"%(paragraph, drug, disease)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
 def extract_predicates(paragraph, entities, predicates):
     prompt =[
           {"role": "system", "content": 
            """
            Task:
-           Extract semantic triplets from the given paragraph. Each triplet should consist of a subject, a predicate, and an object. A list of controlled vocabulary predicates will be provided and the predicate must be selected from the provided list. A list of entities that are likely to be subjects and objects will be provided, however triplets may include subjects and objects not given in the input. If no triplets are found, please return "no triplets". Do not return any additional commentary.
+           Your task is to extract semantic triplets from the given paragraph. Each triplet consists of a subject, a predicate, and an object. A list of controlled predicates will be provided. The predicate must be selected from the provided list. A list of key entities that are subjects and objects is provided as input, however triplets may include subjects and objects not given the list of input entities. Please focus on extracting triplets that use the input entities as subjects and objects, and extract as many triplets as possible. If no triplets are found, please return "no triplets". Do not return any additional commentary.
 
            Example Input:
-           Paragraph: NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. 
-           Predicates:caused by
-           symptoms of
-           blocks
+           Paragraph: NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. It has been know to also treat inflammation. 
+           Predicates:capable of
+           enabled by
+           produces
+           caused by
            treats
+           interacts with
            negatively regulates
-           stimulates
            Entities:NSAIDs
            ibuprofen
+           COX
         
            Example Output:
+           ibuprofen - negatively regulates - cyclooxygenase enzymes
+           ibuprofen - interacts with - cyclooxygenase enzymes
            NSAIDs - negatively regulates - cyclooxygenase enzymes
-           thromboxane A2 - stimulates - platelet aggregations
+           NSAIDs - interacts with - cyclooxygenase enzymes
+           ibuprofen - interacts with - COX-1
+           ibuprofen - interacts with - COX-2
+           NSAIDs - interacts with - COX-1
+           NSAIDs - interacts with - COX-2
+           aspirin - interacts with - COX-1
+           aspirin - interacts with - COX-2
+           indomethacin - interacts with - COX-1
+           indomethacin - interacts with - COX-2
            ibuprofen - negatively regulates - COX-1
            ibuprofen - negatively regulates - COX-2
+           NSAIDs - negatively regulates - COX-1
+           NSAIDs - negatively regulates - COX-2
            aspirin - negatively regulates - COX-1
            aspirin - negatively regulates - COX-2
            indomethacin - negatively regulates - COX-1
            indomethacin - negatively regulates - COX-2
            ibuprofen - treats - headaches
+           ibuprofen - treats - inflammation
            """},
-          {"role": "user", "content": "Paragraph:%s\nEntities:%s\nPredicates:%s"%(paragraph, entities, predicates)}
+          {"role": "user", "content": "Paragraph:%s\nEntities:%sPredicates:%s"%(paragraph, entities, predicates)}
       ]
 
 
@@ -99,15 +267,29 @@ def triplets(text, entities):
           {"role": "system", "content": 
            """
            Task:
-           You will be given a paragraph, and a list of entities. Please extract all semantic triplets from the paragraph as they relate to the given entities. A semantic triplet consists of a subject, a predicate, and an object. The subject is the entity performing the action, the predicate is the action or relationship, and the object is the entity that undergoes the action. Either the object or the subject should be one of the given entities. Multiple triplets may appear in a single sentence. Seperate the subject, predicate, and object with "-" characters, and place each triplet on a newline. Do not return any additional commentary. If no triplets can be extracted, please return "no triplets".
-           Example Input 1:
-           Text: John goes to a crowded grocery store and buys an apple.
-           Entities: ["apple"]
+           Your task is to extract semantic triplets from the given paragraph. Each triplet consists of a subject, a predicate, and an object. A list of key entities that are subjects and objects is provided as input. These entities are the only possible subjects and objects. If no triplets are found, please return "no triplets". Do not return any additional commentary.
+           Example Input:
+           Paragraph:NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. It has been know to also treat inflammation. 
+           Entities:NSAIDs
+           ibuprofen
+           COX-1
+           COX-2
+           COX enzymes
 
-           Example Output 1:
-           John - buys - apple
+           Example Output:
+           ibuprofen - is a - NSAIDs
+           ibuprofen - inhibits - COX enzymes
+           NSAIDs - inhibits - COX enzymes
+           ibuprofen - inhibits - COX-1
+           ibuprofen - inhibits - COX-2
+           NSAIDs - inhibits - COX-1
+           NSAIDs - inhibits - COX-2
+           ibuprofen - inhibits - COX-1
+           ibuprofen - inhibits - COX-2
+           NSAIDs - inhibits - COX-1
+           NSAIDs - inhibits- COX-2
            """},
-          {"role": "user", "content": "Text:%s\nEntities:%s"%(text, entities)}
+          {"role": "user", "content": "Paragraph:%s\nEntities:%s"%(text, entities)}
       ]
 
     completion = client.chat.completions.create(
@@ -116,28 +298,6 @@ def triplets(text, entities):
     )
     response = str(completion.choices[0].message.content)
     return(response, prompt)
-
-def triplicates(text):
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-          {"role": "system", "content": 
-           """
-           Task:
-           Given a sentence please extract all semantic triplets present. A semantic triplet consists of a subject, a predicate, and an object. The subject is the entity performing the action, the predicate is the action or relationship, and the object is the entity that undergoes the action. Multiple triplets may appear in a single sentence. Seperate the subject, predicate, and object with "-" characters, and place each triplet on a newline. Do not return any additional commentary. If no triplets can be extracted, please return "no triplets".
-           Example Input 1:
-           John goes to a crowded grocery store and buys an apple.
-
-           Example Output 1:
-           John - buys - apple
-           John - goes to - grocery store
-           """},
-          {"role": "user", "content": "%s"%(text)}
-      ]
-    )
-    response = str(completion.choices[0].message.content)
-    return(response)
-
 
 def sentence_pos_replacement(sentence, pos):
     completion = client.chat.completions.create(
@@ -160,72 +320,6 @@ def sentence_pos_replacement(sentence, pos):
     )
     response = str(completion.choices[0].message.content)
     return(response)
-
-def shorten_sentences(content):
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-          {"role": "system", "content": 
-           """
-           Task:
-           Rewrite the following text such that every sentence contains no more than one subject, one object, and one verb. Create new sentences as needed, and make sure all nouns are preserved in the output. Use nouns in place of pronouns as often as possible. Do not return any additional commentary, formatting, or spacing.
-           Example Input:
-           The dog runs up the hill and barks at the cat. He wags his tail and greets the human ethusiastically. He sniffs the grass and the fire hydrant every morning.
-           Example Output:
-           The dog runs up the hill. The dog barks at the cat. The dog wags his tail. The dog greets the human enthusiastically. The dog sniffs the grass. The dog sniffs the fire hydrant.
-           """},
-        {"role": "user", "content": "%s"%content}
-      ]
-    )
-    response = str(completion.choices[0].message.content)
-    return(response)
-
-def text_tense(content):
-    """
-    Change the tense to present and change present participles to present tense.
-    """
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-          {"role": "system", "content": 
-            """
-            Task
-            ###
-            Given a text, transform all present participle verb phrases into their present simple forms. Create new, shorter sentences as needed while keeping the original meaning of the text. The response may be repetitive, and do not return any additional commentary, formatting, spacing, or paragraph breaks. 
-
-            Input Example
-            ###
-            The dog was running up the hill and over the river, jumping while he barked. I am beginning to see why everyone loves having pets. The dog plays his part in making me really happy by being joyful.
-            
-            Output Example
-            ###
-            The dogs runs up the hill and over the river. The dog jumps while he barks. I begin to see why everyone loves to have pets. The dog makes me really happy. The dog is joyful.
-            """},
-        {"role": "user", "content": "%s"%content}
-      ]
-    )
-
-    response = str(completion.choices[0].message.content)
-    return(response)
-
-def replace_pronouns(content):
-    """
-    Format the text such that it contains as few prouns as possible.
-    """
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-          {"role": "system", "content": 
-           """
-Given a body of text, completely replace all pronouns (e.g., he, she, it, they, etc.) with explicit nouns mentioned in the text. Additionally, substitute as many common nouns as possible with proper nouns that are explicitly stated within the provided content. Maintain each sentence as a standalone unit, without combining any sentences, even if it results in repetition. Focus solely on substituting pronouns with specific nouns from the text and replacing common nouns with appropriate proper nouns explicitly mentioned within the provided content. Ensure the tense of sentences remains unchanged during the substitution process.
-          Do not return any additional commentary, paragraph spacing, or formatting.
-           """},
-        {"role": "user", "content": "%s"%content}
-      ]
-    )
-    response = str(completion.choices[0].message.content)
-    return(response)
-
 
 def entity_context(text, term):
     completion = client.chat.completions.create(

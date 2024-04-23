@@ -24,7 +24,102 @@ from nltk.stem import WordNetLemmatizer
 lemmatizer = WordNetLemmatizer()
 categories = ["protien", "receptor", "enzyme", "cell", "disease", "gene family", "endogenous small molecule"]
 
+
+def grounded_type(grounded, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
+    grounded_type = {}
+    for key, value in grounded.items():
+        if key not in grounded_type:
+            grounded_type[key] = []
+        for synonym, identifier_list in value.items():
+            #print(key, value, synonym, identifier)
+            for i, identifier in enumerate(identifier_list):
+                if identifier == "":
+                    continue
+                if i == 0:
+                    prefix = "MESH:"
+                elif i == 1:
+                    prefix = "UniprotKB:"
+                elif i == 2:
+                    prefix = "MONDO:"
+                elif i == 3:
+                    prefix == "HPO:"
+                #mesh_id, uniprot, mondo, hpo order for grounding storage
+                identifier = prefix + identifier[0]
+                resp = requests.get(node_norm_url + identifier)
+                data = resp.json()[identifier]
+                if data is None:
+                    continue
+                data_type = data['type'][0]
+                grounded_type[key].append(data_type)
+
+    return(grounded_type)
+
+def ground_synonym(term):
+    url = "https://en.wikipedia.org/w/api.php"
+    params = {
+    "action": "parse",
+    "format": "json",
+    "page": "%s" %(term)
+    }
+    resp = requests.get(url=url, params=params)
+    data = resp.json()
+    html = data['parse']['text']['*']
+    soup = BeautifulSoup(html, "html.parser")
+    redirect = False
+    redirect_term = ""
+    wikibase_id = ""
+    #print(bcolors.OKBLUE + term)
+    for i, paragraph in enumerate(soup.find_all("p")):
+        if paragraph.text.strip() == "Redirect to:":
+            for a in soup.find_all("a"):
+                #print(bcolors.OKCYAN + str(paragraph))
+                #print(bcolors.OKCYAN + str(a))
+                redirect_term = a.text.strip()
+                redirect = True
+                break
+    if redirect:
+        params = {
+        "action": "parse",
+        "format": "json",
+        "page": "%s" %(redirect_term)
+        }
+        resp = requests.get(url=url, params=params)
+        data = resp.json()
+    if "error" in data.keys():
+        print(data)
+        print(term, "bool redirect", redirect, "redirect", redirect_term)
+        sys.exit(1)
+
+    for value in data['parse']['properties']:
+        if value['name'] == 'wikibase_item':
+            wikibase_id = value['*']
+    mesh_id = ""
+    uniprot = ""
+    drugbank = "" #not written in yet
+    mondo = ""
+    hpo = ""
+    if wikibase_id == "":
+        return("", "", "", "")
+    wiki_client = Client() 
+    wiki_entity = wiki_client.get(wikibase_id, load=True)
+    for x in wiki_entity.keys():
+        child = wiki_client.get(x.id)
+        label = str(child.label).strip()
+        if label == "MeSH descriptor ID":
+            mesh_id = wiki_entity.getlist(child)
+        if label == "UniProt protein ID":
+            uniprot = wiki_entity.getlist(child)
+        if label == "Mondo ID":
+            mondo = wiki_entity.getlist(child)
+        if label == "Human Phenotype Ontology ID":
+            hpo = wiki_entity.getlist(child)
+    return(mesh_id, uniprot, mondo, hpo)
+
+
 def get_additional_text(expansion_list, term1, term2, mechanism):
+    """
+    Given a list of wikipedia page titles with information possibily relevant, query wikipedia for the page information and then summarize the page.
+    """
     expansion_list = list(np.unique(expansion_list))
     all_additional_text =""
     for expansion in expansion_list:
@@ -38,7 +133,38 @@ def get_additional_text(expansion_list, term1, term2, mechanism):
 
     return(all_additional_text)
 
+def matched_wikipedia_pages(entity_list):
+    useful_pages = []
+    for entity in entity_list:
+        url = "https://en.wikipedia.org/w/api.php"
+        text_all = ""
+        wikibase_id = ""
+        params = {
+        "action": "opensearch",
+        "format": "json",
+        "search": "%s" %(entity)
+        }
+        resp = requests.get(url=url, params=params)
+        loose_data = resp.json()
+        useful = []
+        if len(loose_data) < 2:
+            continue
+        try:
+            ll = loose_data[1]
+        except:
+            print(entity)
+            print("failure", loose_data)
+            sys.exit(1)
+        for possible_match in loose_data[1]:
+            if possible_match.lower() == entity.lower():
+                useful_pages.append(possible_match)
+    return(useful_pages)
+
+
 def corresponding_pages(entity_list, mechanism):
+    """
+    Given a list of entities, search wikipedia loosely for possibly matching pages. If the page title could possibly be relevant to the mechanism, return the page title.
+    """
     useful_pages = []
     for entity in entity_list:
         url = "https://en.wikipedia.org/w/api.php"
@@ -115,7 +241,7 @@ def get_wikidata_id(wikibase_id, lang='en'):
         #print(term, label, wiki_entity.getlist(child))
 
 
-def alternate_path(term1, term2, predicate_string):
+def alternate_path(term1, term2, predicate_data):
     wiki_client = Client() 
     response, redirect, wikibase_id, linked_entities = query_wikipedia(term1)
     linked_entities = [x.lower() for x in linked_entities]
@@ -159,21 +285,51 @@ def alternate_path(term1, term2, predicate_string):
     entities = response_list[-1].replace("Relevant Entities: ","")
     entity_list = entities.split(", ")
     entity_list = [x.lower().replace(".","") for x in entity_list]
-   
-    #here we expand the entites to capture sub-entities
-    entity_list = expand_entities(entity_list)
-    print(bcolors.OKGREEN + response + bcolors.OKGREEN)
-    print(entity_list)
+
+    synonym_dict = {}
+    synonym_pages_dict = {}
     for entity in entity_list:
-        response, prompt = prompts.test_prompt_2(mechanism, entity)
-        print(bcolors.OKBLUE + entity, bcolors.HEADER + response)
+        resp, prompt = prompts.synonym_prompt(entity)
+        synonym_list = resp.split("\n")
+        final_synonym_list = []
+        for synonym in synonym_list:
+            resp, prompt = prompts.synonym_context(entity, synonym, mechanism)
+            if resp.lower() != "yes":
+                continue
+            final_synonym_list.append(synonym)
+            print(bcolors.HEADER+resp, bcolors.OKBLUE+entity, bcolors.OKGREEN+synonym)
+        synonym_dict[entity] = final_synonym_list
+        #print(bcolors.OKBLUE + "entity " + entity)
+        #print(bcolors.OKCYAN + str(synonym_list))
+        synonym_pages = matched_wikipedia_pages(final_synonym_list)
+        synonym_pages_dict[entity] = synonym_pages
+    print(response)
+    synonym_groundings = {}
+    for key, value in synonym_pages_dict.items():
+        if key not in synonym_groundings:
+            synonym_groundings[key] = {}
+        for entity in value:
+            if entity in synonym_groundings[key]:
+                continue
+            mesh_id, uniprot, mondo, hpo = ground_synonym(entity) 
+            print(bcolors.OKBLUE + key, bcolors.OKCYAN + entity)
+            print(bcolors.HEADER + str(mesh_id), uniprot, mondo, hpo)
+            synonym_groundings[key][entity] = [mesh_id, uniprot, mondo, hpo]
+    grounded_types = grounded_type(synonym_groundings) 
+    with open("test_json.json", "w") as jfile:
+        json.dump({"grounded":synonym_groundings, "grounded_types": grounded_types, "entities":entities, "mechansim":mechanism, "text":paragraph}, jfile)
     sys.exit(0)
 
+    #additional information
     useful_expansions = corresponding_pages(entity_list, mechanism)
-    print(bcolors.OKBLUE + useful_expansions)
+    print(bcolors.OKCYAN + "Useful supporting wikipedia pages")
+    print(bcolors.OKCYAN + str(useful_expansions))
     additional_text = get_additional_text(useful_expansions, term1, term2, mechanism)
+    print(additional_text)
+
+    #re-extract the mechanism of action
     response, prompt = prompts.extract_mech_path(additional_text , term1, term2)
-    print(response)
+    print(bcolors.HEADER + response)
 
     sys.exit(0)
 
@@ -222,29 +378,8 @@ def alternate_path(term1, term2, predicate_string):
     sys.exit(0)
     first_check = {"mechanism":mechanism, "entities":entity_list, "grounded":grounded_ids, "all_supporting_info":all_supporting_information, "final_mech":final_mech, "final_entities":final_entities}
     print(bcolors.OKBLUE + str(grounded_ids))
-    sys.exit(0)
     return(first_check) 
     
-    #####LET'S DO A CHECK HERE FOR THE PERCENT OF NODES FOUND IN OUR DATA
-
-    print(predicate_string)
-    triples, prompt  = prompts.extract_predicates(paragraph, entity_string, predicate_string)
-    print(triples)
-    sys.exit(0)
-    triples_list = triples.split("\n")
-    
-    for triple in triples_list:
-        print(triple)
-        tmp_list = triple.split(" - ")
-        subj = tmp_list[0]
-        predicate = tmp_list[1]
-        obj = tmp_list[2]
-        subj_ids = query_wikipedia_mesh(subj)
-        obj_ids = query_wikipedia_mesh(obj)
-        print(subj, subj_ids)
-        print(obj, obj_ids)
-    sys.exit(0)
-    print(bcolors.OKGREEN + response + bcolors.OKGREEN)    
 
 def query_wikipedia_mesh(term):
     """
@@ -459,7 +594,7 @@ def grade_grounding_step(expected, output_filename):
 def main():
     client = OpenAI()
     url = "https://en.wikipedia.org/w/api.php"
-
+    node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="
     solution_filename = "data.tsv"
     solution_df = pd.read_table(solution_filename)
     num_abstracts = 20
@@ -472,25 +607,8 @@ def main():
     with open(entity_json, "r") as jfile:
         entity_data = json.load(jfile) 
     with open(predicate_json, "r") as jfile:
-        data = json.load(jfile)
-    predicate_string = ""
-    predicate_list = []
-    for key, value in data.items():
-        predicate = key.lower()
-        predicate_list.append(predicate)
-        #print(predicate, value)
-        if 'definition' not in value:
-            #print(key, value['subclass'])
-            #continue
-            defintion = predicate
-        else:
-            definition = value['definition'].lower()
+        predicate_data = json.load(jfile)
 
-        #predicate_string += predicate + "-" + definition + "\n"
-        predicate_string += predicate + "\n"
-    #print(predicate_string)
-    #sys.exit(0)
-    
     for i, (index, row) in enumerate(solution_df.iterrows()):
         #print(i, "of", len(solution_df), "done.") 
         if i != 1:
@@ -512,7 +630,51 @@ def main():
         #    continue
         print("\n")
         print(bcolors.HEADER + str(solution_identifiers) + bcolors.HEADER)
-        first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_string)
+        #first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_data)
+        #sys.exit(0)
+
+        with open("test_json.json", "r") as jfile:
+            data = json.load(jfile)
+        mechanism = data['mechansim']
+        entities = data['entities']
+        grounded = data['grounded']
+        grounded_types = data['grounded_types']
+        entity_list = entities.split(", ")
+        entity_string = ""
+        for entity in entity_list:
+            entity_string += entity + "\n"
+        print(entity_string)
+        resp, prompt = prompts.triplets(mechanism, entity_string) 
+        print(mechanism)
+        print(bcolors.OKBLUE + resp)
+        sys.exit(0)
+
+        all_ranges = []
+        range_dict = {}
+        for key, value in predicate_data.items():
+            if key not in range_dict:
+                range_dict[key] = []
+            if 'range' in value or "domain" in value:
+                if 'range' in value:
+                    all_ranges.append(value['range'])
+                if 'domain' in value:
+                    all_ranges.append(value['domain'])
+                try:
+                    range_dict[key] = [value['range'], value['domain']]
+                except:
+                    print(key, value)
+            else:
+                subclass_of = value['subclass']
+                subclass_look = predicate_data[subclass_of]
+
+                while "range" not in subclass_look and "domain" not in subclass_look:
+                    subclass_of = subclass_look['subclass']
+                    subclass_look = predicate_data[subclass_of]
+                range_dict[key] = [subclass_look['range'], subclass_look['domain']]
+        print(bcolors.OKBLUE + str(np.unique(all_ranges)))
+        print(range_dict)
+        #triples, prompt  = prompts.extract_predicates(paragraph, entity_string, predicate_string)
+        sys.exit(0)
         with open(output_filename, 'w') as jfile:
             json.dump(first_check, jfile)
         #print_done_work(output_filename, solution_identifiers)
