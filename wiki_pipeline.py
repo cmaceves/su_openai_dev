@@ -24,6 +24,50 @@ from nltk.stem import WordNetLemmatizer
 lemmatizer = WordNetLemmatizer()
 categories = ["protien", "receptor", "enzyme", "cell", "disease", "gene family", "endogenous small molecule"]
 
+def camel_case_to_words(camel_case):
+    words = re.findall(r'[A-Z](?:[a-z]+|[A-Z]*(?=[A-Z]|$))', camel_case)
+    new_word = ' '.join(words)
+    return new_word.lower()
+
+def find_predicates(predicate_data, sub_types, obj_types):
+    predicate_list = []
+    translated_sub = []
+    for sub in sub_types:
+        sub = sub.replace("biolink:","")
+        new_sub = camel_case_to_words(sub)
+        translated_sub.append(new_sub)
+    translated_obj = []
+    for obj in obj_types:
+        obj = obj.replace("biolink:","")
+        new_obj = camel_case_to_words(obj)
+        translated_obj.append(new_obj)
+    #domain is subject and range is object
+    for key, value in predicate_data.items():
+        range_val = ""
+        domain_val = ""
+        if 'range' in value:
+            range_val = value['range']
+        if 'domain' in value:
+            domain_val = value['domain']
+
+        if range_val == "":
+            subclass_of = value['subclass']
+            subclass_look = predicate_data[subclass_of]
+            while "range" not in subclass_look:
+                subclass_of = subclass_look['subclass']
+                subclass_look = predicate_data[subclass_of]
+            range_val = subclass_look['range']
+
+        if domain_val == "":
+            subclass_of = value['subclass']
+            subclass_look = predicate_data[subclass_of]
+            while "domain" not in subclass_look:
+                subclass_of = subclass_look['subclass']
+                subclass_look = predicate_data[subclass_of]
+            domain_val = subclass_look['domain']
+        #if range_val in translated_sub:
+        print(bcolors.HEADER+key, bcolors.OKCYAN + range_val, bcolors.OKGREEN + domain_val)
+    sys.exit(0)
 
 def grounded_type(grounded, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
     grounded_type = {}
@@ -295,6 +339,7 @@ def alternate_path(term1, term2, predicate_data):
         for synonym in synonym_list:
             resp, prompt = prompts.synonym_context(entity, synonym, mechanism)
             if resp.lower() != "yes":
+                #print("FAILED", entity, synonym, resp)
                 continue
             final_synonym_list.append(synonym)
             print(bcolors.HEADER+resp, bcolors.OKBLUE+entity, bcolors.OKGREEN+synonym)
@@ -316,8 +361,19 @@ def alternate_path(term1, term2, predicate_data):
             print(bcolors.HEADER + str(mesh_id), uniprot, mondo, hpo)
             synonym_groundings[key][entity] = [mesh_id, uniprot, mondo, hpo]
     grounded_types = grounded_type(synonym_groundings) 
+
+    entity_list = entities.split(", ")
+    entity_string = ""
+    for entity in entity_list:
+        entity_string += entity + "\n"
+    print(entity_string)
+    resp, prompt = prompts.triplets(mechanism, entity_string) 
+    triplets = resp.split("\n")
+    print(mechanism)
+    print(bcolors.OKBLUE + resp)
+
     with open("test_json.json", "w") as jfile:
-        json.dump({"grounded":synonym_groundings, "grounded_types": grounded_types, "entities":entities, "mechansim":mechanism, "text":paragraph}, jfile)
+        json.dump({"grounded":synonym_groundings, "grounded_types": grounded_types, "entities":entities, "mechansim":mechanism, "text":paragraph, "triplets": triplets}, jfile)
     sys.exit(0)
 
     #additional information
@@ -639,40 +695,31 @@ def main():
         entities = data['entities']
         grounded = data['grounded']
         grounded_types = data['grounded_types']
-        entity_list = entities.split(", ")
-        entity_string = ""
-        for entity in entity_list:
-            entity_string += entity + "\n"
-        print(entity_string)
-        resp, prompt = prompts.triplets(mechanism, entity_string) 
-        print(mechanism)
-        print(bcolors.OKBLUE + resp)
+        triples = data['triplets']
+
+        print(bcolors.OKCYAN + mechanism)
+        print(bcolors.OKBLUE + entities)
+        for triple in triples:
+            triple_list = triple.split(" - ")
+            sub_val = triple_list[0]
+            obj_val = triple_list[-1]
+            print(bcolors.HEADER + sub_val, obj_val)
+            #get the subject type
+            if sub_val in grounded_types:
+                sub_types = grounded_types[sub_val]
+            else:
+                sub_types = []
+            print(sub_types)
+            
+            #get the object type
+            if obj_val in grounded_types:
+                obj_types = grounded_types[obj_val]
+            else:
+                obj_types = []
+            predicate_list = find_predicates(predicate_data, sub_types, obj_types)
+            sys.exit(0)
         sys.exit(0)
 
-        all_ranges = []
-        range_dict = {}
-        for key, value in predicate_data.items():
-            if key not in range_dict:
-                range_dict[key] = []
-            if 'range' in value or "domain" in value:
-                if 'range' in value:
-                    all_ranges.append(value['range'])
-                if 'domain' in value:
-                    all_ranges.append(value['domain'])
-                try:
-                    range_dict[key] = [value['range'], value['domain']]
-                except:
-                    print(key, value)
-            else:
-                subclass_of = value['subclass']
-                subclass_look = predicate_data[subclass_of]
-
-                while "range" not in subclass_look and "domain" not in subclass_look:
-                    subclass_of = subclass_look['subclass']
-                    subclass_look = predicate_data[subclass_of]
-                range_dict[key] = [subclass_look['range'], subclass_look['domain']]
-        print(bcolors.OKBLUE + str(np.unique(all_ranges)))
-        print(range_dict)
         #triples, prompt  = prompts.extract_predicates(paragraph, entity_string, predicate_string)
         sys.exit(0)
         with open(output_filename, 'w') as jfile:

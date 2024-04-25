@@ -32,20 +32,24 @@ sys.exit(0)
 predicate_dict = {}
 useful_is_a = ['node property', 'association slot', 'aggregate statistic', 'interbase coordinate']
 for key, value in data['slots'].items():
-    print(key, value)
-    if 'is_a' not in value:
+
+    if ('range' not in value or 'domain' not in value) and "is_a" not in value:
+        print(key, value)
         continue
-    if value['is_a'] in useful_is_a:
+    if 'is_a' in value and value['is_a'] in useful_is_a:
         #print(key, "-", value['is_a'])
         continue
     if key not in predicate_dict:
         predicate_dict[key] = {}
     if "description" in value:
         predicate_dict[key]["definition"] = value['description']
-    predicate_dict[key]["subclass"] = value['is_a']
+    if "is_a" in value:
+        predicate_dict[key]["subclass"] = value['is_a']
     if "domain" in value:
         predicate_dict[key]['domain'] = value['domain']
-print(predicate_dict.keys())
+    if 'range' in value:
+        predicate_dict[key]["range"] = value['range']
+#print(predicate_dict.keys())
 with open("predicates.json", "w") as jfile:
     json.dump(predicate_dict, jfile)
 
