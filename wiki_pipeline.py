@@ -24,12 +24,23 @@ from nltk.stem import WordNetLemmatizer
 lemmatizer = WordNetLemmatizer()
 categories = ["protien", "receptor", "enzyme", "cell", "disease", "gene family", "endogenous small molecule"]
 
+def expand_entity_tree(entity_types, entity_data):
+    """
+    Given an entity category, traverse up the tree to get all possible classifications.
+    """
+    all_categories = []
+    for entity in entity_types:
+        all_categories.append(entity)
+        if entity in entity_data:
+            all_categories.extend(entity_data[entity])
+    return(all_categories)
+
 def camel_case_to_words(camel_case):
     words = re.findall(r'[A-Z](?:[a-z]+|[A-Z]*(?=[A-Z]|$))', camel_case)
     new_word = ' '.join(words)
     return new_word.lower()
 
-def find_predicates(predicate_data, sub_types, obj_types):
+def find_predicates(predicate_data, entity_data, sub_types, obj_types):
     predicate_list = []
     translated_sub = []
     for sub in sub_types:
@@ -41,8 +52,15 @@ def find_predicates(predicate_data, sub_types, obj_types):
         obj = obj.replace("biolink:","")
         new_obj = camel_case_to_words(obj)
         translated_obj.append(new_obj)
+    
+    translated_obj = expand_entity_tree(translated_obj, entity_data)
+    translated_sub = expand_entity_tree(translated_sub, entity_data)
+    
     #domain is subject and range is object
     for key, value in predicate_data.items():
+        useable = False
+        if 'range' not in value and 'domain' not in value and 'subclass' not in value:
+            continue
         range_val = ""
         domain_val = ""
         if 'range' in value:
@@ -50,24 +68,46 @@ def find_predicates(predicate_data, sub_types, obj_types):
         if 'domain' in value:
             domain_val = value['domain']
 
-        if range_val == "":
+        if range_val == "" and "subclass" in value:
             subclass_of = value['subclass']
             subclass_look = predicate_data[subclass_of]
-            while "range" not in subclass_look:
+            while "range" not in subclass_look and "subclass" in subclass_look:
                 subclass_of = subclass_look['subclass']
                 subclass_look = predicate_data[subclass_of]
-            range_val = subclass_look['range']
+            if 'range' in subclass_look:
+                range_val = subclass_look['range']
 
-        if domain_val == "":
+        if domain_val == "" and "subclass" in value:
             subclass_of = value['subclass']
-            subclass_look = predicate_data[subclass_of]
-            while "domain" not in subclass_look:
+            try:
+                subclass_look = predicate_data[subclass_of]
+            except:
+                print(key, subclass_of)
+                continue
+            while "domain" not in subclass_look and "subclass" in subclass_look:
                 subclass_of = subclass_look['subclass']
                 subclass_look = predicate_data[subclass_of]
-            domain_val = subclass_look['domain']
-        #if range_val in translated_sub:
-        print(bcolors.HEADER+key, bcolors.OKCYAN + range_val, bcolors.OKGREEN + domain_val)
-    sys.exit(0)
+            if 'domain' in subclass_look:
+                domain_val = subclass_look['domain']
+         
+        if len(translated_sub) > 0 and len(translated_obj) > 0:
+            if domain_val in translated_obj and range_val in translated_sub:
+                useable = True
+            else:
+                useable = False
+        elif len(translated_sub) > 0 and len(translated_obj) == 0:
+            if range_val in translated_sub:
+                useable = True
+            else:
+                useable = False
+        elif len(translated_obj) > 0 and len(translated_sub) == 0:
+            if domain_val in translated_obj:
+                useable = True
+            else:
+                useable = False
+        if useable is True:
+            predicate_list.append(key)
+    return(predicate_list)
 
 def grounded_type(grounded, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
     grounded_type = {}
@@ -703,20 +743,19 @@ def main():
             triple_list = triple.split(" - ")
             sub_val = triple_list[0]
             obj_val = triple_list[-1]
-            print(bcolors.HEADER + sub_val, obj_val)
+            print(bcolors.HEADER + sub_val, bcolors.OKBLUE + triple_list[1], bcolors.OKCYAN + obj_val)
             #get the subject type
             if sub_val in grounded_types:
                 sub_types = grounded_types[sub_val]
             else:
-                sub_types = []
-            print(sub_types)
-            
+                sub_types = []            
             #get the object type
             if obj_val in grounded_types:
                 obj_types = grounded_types[obj_val]
             else:
                 obj_types = []
-            predicate_list = find_predicates(predicate_data, sub_types, obj_types)
+            predicate_list = find_predicates(predicate_data, entity_data, sub_types, obj_types)
+            print(predicate_list)
             sys.exit(0)
         sys.exit(0)
 
