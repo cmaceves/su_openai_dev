@@ -5,12 +5,84 @@ import pandas as pd
 from openai import OpenAI
 client = OpenAI()
 
+def standardize_predicates_2(paragraph, entities, predicates):
+    prompt=[
+          {"role": "system", "content": 
+           """
+           Task:
+           Your task is to extract semantic triplets from the given paragraph. Each triplet consists of a subject, a predicate, and an object. A list of key entities that are subjects and objects is provided as input. These entities are the only possible subjects and objects. A list of predicates is procided as input. These predicates are the only possible predicates. If no triplets are found, please return "no triplets". Do not return any additional commentary.
+           Example Input:
+           Paragraph:NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. It has been know to also treat inflammation. 
+           Entities:NSAIDs
+           ibuprofen
+           COX-1
+           COX-2
+           COX enzymes
+           Predicates:related to
+           binds
+           models
+           exact match
+           causes
+           broad match
+           inhibits
+           narrow match
+
+           Example Output:
+           ibuprofen - narrow match - NSAIDs
+           ibuprofen - inhibits - COX enzymes
+           NSAIDs - inhibits - COX enzymes
+           ibuprofen - inhibits - COX-1
+           ibuprofen - inhibits - COX-2
+           NSAIDs - inhibits - COX-1
+           NSAIDs - inhibits - COX-2
+           ibuprofen - inhibits - COX-1
+           ibuprofen - inhibits - COX-2
+           NSAIDs - inhibits - COX-1
+           NSAIDs - inhibits- COX-2
+           """},
+          {"role": "user", "content": "Paragraph:%s\nEntities:%s\nPredicates:%s"%(paragraph, entities, predicates)}
+      ]
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+def standardize_predicates(statement):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           You are a helpful assistant. Answer the question with a "yes" or "no" with no additional commentary.
+           """},
+          {"role": "user", "content": "Doe the statement '%s' make sense grammatically, yes or no?"%(statement)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+
 def synonym_context(word1, word2, paragraph):
     prompt =[
           {"role": "system", "content": 
            """
            Task:
-           You will be given a paragraph, and word of interest, and a synonym for that word. Your job is to determine whether or not the synonym means the same thing as the word of interest in the context of the paragraph. If the word and the synonym mean the same thing in the context of the pargraph, return "yes" otherwise return "no". Don't return any additional commentary or formatting.
+           You are a helpful assistant. You will be given a paragraph, a word of interest, and a synonym for the word of interest. Your job is to determine whether or not the synonym means the same thing as the word of interest in the context of the paragraph. If the word and the synonym mean the same thing in the context of the pargraph, return "yes" otherwise return "no" in lowercase with no punctuation. Do not return any additional commentary or formatting.
+           Example Input Format:
+           Paragraph:Insert paragraph here.
+           Word of interest: Insert word here.
+           Synonym: Insert synonym here.
+
+           Example Output Format:
+           yes
            """},
           {"role": "user", "content": "Paragraph:%s\nWord of interest:%s\nSynonym:%s"%(paragraph, word1, word2)}
       ]
@@ -29,13 +101,13 @@ def synonym_prompt(entity):
           {"role": "system", "content": 
            """
            Task:
-           You will be provided a biological entity, please return all synonyms foe that entity. Be as comprehensive and specific as possible. Return each synonym on a newline in the following format, with no additional commentary or formatting.
-           Output Format:
-           Synonym1
-           Synonym2
-           Synonym3
+           You are a helpful assistant. You will be provided a biological entity. Return each synonym on a newline as a numbered list with no additional commentary or formatting.
+           Example Output Format:
+           1. Synonym1
+           2. Synonym2
+           3. Synonym3
            """},
-          {"role": "user", "content": "What are synonyms for %s?"%(entity)}
+          {"role": "user", "content": "What are all synonyms for '%s'?"%(entity)}
       ]
 
 

@@ -217,32 +217,32 @@ def get_additional_text(expansion_list, term1, term2, mechanism):
 
     return(all_additional_text)
 
-def matched_wikipedia_pages(entity_list):
-    useful_pages = []
-    for entity in entity_list:
-        url = "https://en.wikipedia.org/w/api.php"
-        text_all = ""
-        wikibase_id = ""
-        params = {
-        "action": "opensearch",
-        "format": "json",
-        "search": "%s" %(entity)
-        }
-        resp = requests.get(url=url, params=params)
-        loose_data = resp.json()
-        useful = []
-        if len(loose_data) < 2:
-            continue
-        try:
-            ll = loose_data[1]
-        except:
-            print(entity)
-            print("failure", loose_data)
-            sys.exit(1)
-        for possible_match in loose_data[1]:
-            if possible_match.lower() == entity.lower():
-                useful_pages.append(possible_match)
-    return(useful_pages)
+def matched_wikipedia_pages(entity):
+    useful_pages = [] 
+    url = "https://en.wikipedia.org/w/api.php"
+    text_all = ""
+    wikibase_id = ""
+    params = {
+    "action": "opensearch",
+    "format": "json",
+    "search": "%s" %(entity)
+    }
+    resp = requests.get(url=url, params=params)
+    loose_data = resp.json()
+    useful = []
+    if len(loose_data) < 2:
+        return({})
+    try:
+        ll = loose_data[1]
+    except:
+        print(entity)
+        print("failure", loose_data)
+        sys.exit(1)
+    for possible_match in loose_data[1]:
+        #print(bcolors.OKGREEN + "possible match", bcolors.OKGREEN + entity, possible_match)
+        if possible_match.lower() == entity.lower():
+            useful_pages.append(possible_match)
+    return({"entity":entity, "pages": useful_pages})
 
 
 def corresponding_pages(entity_list, mechanism):
@@ -325,34 +325,26 @@ def get_wikidata_id(wikibase_id, lang='en'):
         #print(term, label, wiki_entity.getlist(child))
 
 
-def alternate_path(term1, term2, predicate_data):
+def get_mechanism(term1, term2):
+    """
+    Function to get the mechanism and entities associated.
+    """
+    print("fetching mechanism")
     wiki_client = Client() 
+    #wikpedia query for the first term
     response, redirect, wikibase_id, linked_entities = query_wikipedia(term1)
-    linked_entities = [x.lower() for x in linked_entities]
  
     if redirect:
         response, redirect, wikibase_id, linked_entities = query_wikipedia(response)
-    if wikibase_id != "":
-        wiki_entity = wiki_client.get(wikibase_id, load=True)
-        for x in wiki_entity.keys():
-            child = wiki_client.get(x.id)
-            label = str(child.label).strip()
-            if label == "MeSH descriptor ID":
-                mesh_id = wiki_entity.getlist(child)
-    #get_wikidata_id(wikibase_id)
-
-    linked_entities_1 = [x.lower() for x in linked_entities]        
     tmp = response.split(".")
     paragraph1 = ""
     for sentence in tmp:
         paragraph1 += sentence.strip() + ". "
-    all_entities = linked_entities_1
+
+    #wikipedia quert for the second term
     response, redirect, wikibase_id, linked_entities = query_wikipedia(term2)
     if redirect:
         response, redirect, wikibase_id, linked_entities = query_wikipedia(response)
-    linked_entities_2 = [x.lower() for x in linked_entities]
-    overlap = [x for x in linked_entities_1 if x in linked_entities_2]
-    overlap = list(np.unique(overlap))
     tmp = response.split(".")
     paragraph2 = ""
     for sentence in tmp:
@@ -360,46 +352,101 @@ def alternate_path(term1, term2, predicate_data):
     
     paragraph = paragraph1 + " " + paragraph2
 
-    try:
-        response, prompt = prompts.extract_mech_path(paragraph, term1, term2)
-    except:
-        return({})
+    response, prompt = prompts.extract_mech_path(paragraph, term1, term2)
     response_list = response.split("\n")
     mechanism = response_list[0].replace("Mechanism: ", "")
-    entities = response_list[-1].replace("Relevant Entities: ","")
+    entities = response_list[-1].replace("Relevant Entities: ","").replace("Relevant Entities:","")
     entity_list = entities.split(", ")
     entity_list = [x.lower().replace(".","") for x in entity_list]
+    return(mechanism, entity_list)
 
-    synonym_dict = {}
-    synonym_pages_dict = {}
-    for entity in entity_list:
-        resp, prompt = prompts.synonym_prompt(entity)
-        synonym_list = resp.split("\n")
-        final_synonym_list = []
-        for synonym in synonym_list:
-            resp, prompt = prompts.synonym_context(entity, synonym, mechanism)
-            if resp.lower() != "yes":
-                #print("FAILED", entity, synonym, resp)
-                continue
-            final_synonym_list.append(synonym)
-            print(bcolors.HEADER+resp, bcolors.OKBLUE+entity, bcolors.OKGREEN+synonym)
-        synonym_dict[entity] = final_synonym_list
-        #print(bcolors.OKBLUE + "entity " + entity)
-        #print(bcolors.OKCYAN + str(synonym_list))
-        synonym_pages = matched_wikipedia_pages(final_synonym_list)
-        synonym_pages_dict[entity] = synonym_pages
-    print(response)
-    synonym_groundings = {}
-    for key, value in synonym_pages_dict.items():
-        if key not in synonym_groundings:
-            synonym_groundings[key] = {}
-        for entity in value:
-            if entity in synonym_groundings[key]:
-                continue
-            mesh_id, uniprot, mondo, hpo = ground_synonym(entity) 
-            print(bcolors.OKBLUE + key, bcolors.OKCYAN + entity)
-            print(bcolors.HEADER + str(mesh_id), uniprot, mondo, hpo)
-            synonym_groundings[key][entity] = [mesh_id, uniprot, mondo, hpo]
+def alternate_path(term1, term2, predicate_data, filename):
+    """
+    1. Use both terms to query wikipedia, and derive a mechanism and important entities.
+    2. Exapnd the entities to synonyms.
+    3. Ground entities and their synonyms.
+    """
+    if os.path.isfile(filename):
+        with open(filename, 'r') as jfile:
+            output_data = json.load(jfile)
+    else:
+        output_data = {}
+    
+    #get mechanism and entities
+    mech = False
+    if mech:
+        mechanism, entity_list = get_mechanism(term1, term2)
+        output_data['mechanism'] = mechanism
+        output_data['entities'] = entity_list
+    else:
+        mechanism = output_data['mechanism']
+        entity_list = output_data['entities']
+
+    #expand entities to synonyms
+    syn = False
+    if syn:
+        synonym_dict = {}
+        for entity in entity_list:
+            resp, prompt = prompts.synonym_prompt(entity)
+            synonym_list = resp.split("\n")
+            synonym_list = [x.split(". ")[1].rstrip() for x in synonym_list]
+            final_synonym_list = []
+            print(bcolors.HEADER+entity, bcolors.HEADER + str(synonym_list))
+            for synonym in synonym_list:
+                resp, prompt = prompts.synonym_context(entity, synonym, mechanism)
+                if resp.lower() != "yes":
+                    continue
+                final_synonym_list.append(synonym)
+                print(bcolors.OKCYAN+resp, bcolors.OKBLUE+entity, bcolors.OKGREEN+synonym)
+            synonym_dict[entity] = final_synonym_list
+        output_data['synonyms'] = synonym_dict
+    else:
+        synonym_dict = output_data['synonyms']
+
+    #find wikipedia pages for synonyms
+    wiki = True
+    if wiki:
+        synonym_pages_dict = {}
+        pooled_synonyms = []
+        for entity, synonym_list in synonym_dict.items():
+            pooled_synonyms.extend(synonym_list)
+            
+        synonym_pages = Parallel(n_jobs=5)(delayed(matched_wikipedia_pages)(synonym) for synonym in pooled_synonyms) 
+        tmp_dict = {}
+        print(synonym_pages)
+        for synonym_search in synonym_pages:
+            if len(synonym_search['pages']) > 0:
+                tmp_dict[synonym_search['entity']] = synonym_search['pages']
+        for entity, synonym_list in synonym_dict.items():
+            for key, value in tmp_dict.items():
+                if key in synonym_list:
+                    if entity not in synonym_pages_dict:
+                        synonym_pages_dict[entity] = []
+                    synonym_pages_dict[entity].extend(value)
+        print(synonym_pages_dict)
+        output_data['synonym_pages'] = synonym_pages_dict
+    else:
+        synonym_pages_dict = output_data['synonym_pages']
+
+    with open(filename, 'w') as jfile:
+        json.dump(output_data, jfile)
+
+    sys.exit(0)
+
+    #ground using wikipedia pages
+    if ground:
+        synonym_groundings = {}
+        for key, value in synonym_pages_dict.items():
+            if key not in synonym_groundings:
+                synonym_groundings[key] = {}
+            for entity in value:
+                if entity in synonym_groundings[key]:
+                    continue
+                mesh_id, uniprot, mondo, hpo = ground_synonym(entity) 
+                print(bcolors.OKBLUE + key, bcolors.OKCYAN + entity)
+                print(bcolors.HEADER + str(mesh_id), uniprot, mondo, hpo)
+                synonym_groundings[key][entity] = [mesh_id, uniprot, mondo, hpo]
+        
     grounded_types = grounded_type(synonym_groundings) 
 
     entity_list = entities.split(", ")
@@ -700,6 +747,32 @@ def main():
     indication_json = "./indication_paths.json"
     literature_dir = "./wiki_text"
     solution_names = parse_solutions(indication_json, solution_df)
+    with open("indication_paths.json", "r") as jfile:
+        data = json.load(jfile)
+
+    drugmech_predicates = []
+    drugmech_entities = []
+    predicate_restrictions = {}
+    for graph in data:
+        for i,link in enumerate(graph['links']):
+            sub = link['source']
+            obj = link['target']
+            predicate = link['key']
+            for node in graph['nodes']:
+                if node['id'] == sub:
+                    sub_cat = node['label']
+                if node['id'] == obj:
+                    obj_cat = node['label']
+            if predicate not in predicate_restrictions:
+                predicate_restrictions[predicate] = []
+            if [sub_cat, obj_cat] not in predicate_restrictions[predicate]:
+                predicate_restrictions[predicate].append([sub_cat, obj_cat])
+            drugmech_entities.append(sub_cat)
+            drugmech_entities.append(obj_cat)
+            drugmech_predicates.append(predicate)
+    drug_mech_entities = list(np.unique(drugmech_entities))
+    drug_mech_predicates = list(np.unique(drugmech_predicates))
+
     with open(entity_json, "r") as jfile:
         entity_data = json.load(jfile) 
     with open(predicate_json, "r") as jfile:
@@ -726,8 +799,8 @@ def main():
         #    continue
         print("\n")
         print(bcolors.HEADER + str(solution_identifiers) + bcolors.HEADER)
-        #first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_data)
-        #sys.exit(0)
+        first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_data, "test_json.json")
+        sys.exit(0)
 
         with open("test_json.json", "r") as jfile:
             data = json.load(jfile)
@@ -736,27 +809,91 @@ def main():
         grounded = data['grounded']
         grounded_types = data['grounded_types']
         triples = data['triplets']
-
         print(bcolors.OKCYAN + mechanism)
         print(bcolors.OKBLUE + entities)
+
+        grounded_types = grounded_type(grounded)
+        print(grounded_types)
+        print(grounded)
+        sys.exit(0)
+        predicate_string = ""
+        entity_string = ""
+        for i,entity in enumerate(entities):
+            if i != 0:
+                entity_string += "\n"
+            entity_string += entity
+
+        for i, (key, value) in enumerate(predicate_data.items()):
+            if i != 0:
+                predicate_string += "\n"
+            predicate_string += key
+
+        possible_predicates = {}
         for triple in triples:
             triple_list = triple.split(" - ")
             sub_val = triple_list[0]
-            obj_val = triple_list[-1]
+            obj_val = triple_list[-1].rstrip()
+            key_pair = sub_val + "_" + obj_val
+            if key_pair in possible_predicates:
+                continue
             print(bcolors.HEADER + sub_val, bcolors.OKBLUE + triple_list[1], bcolors.OKCYAN + obj_val)
+
             #get the subject type
-            if sub_val in grounded_types:
-                sub_types = grounded_types[sub_val]
+            if sub_val.lower() in grounded_types:
+                sub_types = grounded_types[sub_val.lower()]
             else:
                 sub_types = []            
             #get the object type
-            if obj_val in grounded_types:
-                obj_types = grounded_types[obj_val]
+            if obj_val.lower() in grounded_types:
+                obj_types = grounded_types[obj_val.lower()]
             else:
                 obj_types = []
-            predicate_list = find_predicates(predicate_data, entity_data, sub_types, obj_types)
+            sub_types = [x.replace("biolink:","") for x in np.unique(sub_types)]
+            obj_types = [x.replace("biolink:","") for x in np.unique(obj_types)]
+
+            predicate_list = []
+            static_mappings = {"SmallMolecule":"Drug"}
+            sub_types = [static_mappings[x] if x in static_mappings else x for x in sub_types]
+            obj_types = [static_mappings[x] if x in static_mappings else x for x in obj_types]
+            for key, value in predicate_restrictions.items():
+                for val in value:
+                    if val[0] in sub_types and val[1] in obj_types:
+                        if key not in predicate_list:
+                            predicate_list.append(key)
+            print(grounded_types)
+            if len(predicate_list) == 0:
+                print("subject types", sub_types)
+                print("object types", obj_types)
+                print("heree")
+                continue
+            print("subject types", sub_types)
+            print("object types", obj_types)
+            print(grounded_types.keys())
+            print(obj_val.lower())
             print(predicate_list)
+            """
+            predicate_list = find_predicates(predicate_data, entity_data, sub_types, obj_types)
+            predicate_string = ""
+            for j,predicate in enumerate(predicate_list):
+                if j != 0:
+                    predicate_string += "\n"
+                predicate_string += predicate
+            """
+            possible = []  
             sys.exit(0)
+            print(len(drug_mech_predicates))
+
+            for predicate in drug_mech_predicates:
+                statement = sub_val + " " + predicate + " " + obj_val
+                resp, prompt = prompts.standardize_predicates(statement)
+                print(bcolors.HEADER + statement, bcolors.OKCYAN + resp)
+            print(sub_val, obj_val, predicate)
+            sys.exit(0)
+            continue
+            sys.exit(0)
+            #possible_predicates[key_pair] = possible
+            #print(possible)
+        print(possible_predicates)
         sys.exit(0)
 
         #triples, prompt  = prompts.extract_predicates(paragraph, entity_string, predicate_string)
