@@ -31,15 +31,9 @@ with open(entity_definition_file, 'w') as jfile:
     json.dump(entities, jfile)
 
 predicate_dict = {}
-useful_is_a = []
 for key, value in data['slots'].items():
-    if key == "node property":
-        print(key, value)
-    if 'is_a' in value and value['is_a'] in useful_is_a:
-        #print(key, "-", value['is_a'])
-        continue
-    if key == "synonym":
-        print(key, value)
+    #if key == "subject":
+    #    print(key, value)
     if key not in predicate_dict:
         predicate_dict[key] = {}
     if "description" in value:

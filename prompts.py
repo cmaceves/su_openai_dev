@@ -5,70 +5,67 @@ import pandas as pd
 from openai import OpenAI
 client = OpenAI()
 
-def standardize_predicates_2(paragraph, entities, predicates):
-    prompt=[
-          {"role": "system", "content": 
-           """
-           Task:
-           Your task is to extract semantic triplets from the given paragraph. Each triplet consists of a subject, a predicate, and an object. A list of key entities that are subjects and objects is provided as input. These entities are the only possible subjects and objects. A list of predicates is procided as input. These predicates are the only possible predicates. If no triplets are found, please return "no triplets". Do not return any additional commentary.
-           Example Input:
-           Paragraph:NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. It has been know to also treat inflammation. 
-           Entities:NSAIDs
-           ibuprofen
-           COX-1
-           COX-2
-           COX enzymes
-           Predicates:related to
-           binds
-           models
-           exact match
-           causes
-           broad match
-           inhibits
-           narrow match
-
-           Example Output:
-           ibuprofen - narrow match - NSAIDs
-           ibuprofen - inhibits - COX enzymes
-           NSAIDs - inhibits - COX enzymes
-           ibuprofen - inhibits - COX-1
-           ibuprofen - inhibits - COX-2
-           NSAIDs - inhibits - COX-1
-           NSAIDs - inhibits - COX-2
-           ibuprofen - inhibits - COX-1
-           ibuprofen - inhibits - COX-2
-           NSAIDs - inhibits - COX-1
-           NSAIDs - inhibits- COX-2
-           """},
-          {"role": "user", "content": "Paragraph:%s\nEntities:%s\nPredicates:%s"%(paragraph, entities, predicates)}
-      ]
-
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
-def standardize_predicates(statement):
+def describe_accuracy(statement):
     prompt =[
           {"role": "system", "content": 
            """
-           Task:
-           You are a helpful assistant. Answer the question with a "yes" or "no" with no additional commentary.
+           You are a helpful assistant.
            """},
-          {"role": "user", "content": "Doe the statement '%s' make sense grammatically, yes or no?"%(statement)}
+          {"role": "user", "content": "Is the statement '%s' accurate? Please respond with a 'yes' or 'no', and if the statement is only partically accurate respond with 'no'. Do not return any additional commentary or formatting."%(statement)}
       ]
 
+    completion = client.chat.completions.create(
+    model="gpt-4-turbo",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+def describe_relationship(sub, obj):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           You are a helpful assistant.
+           """},
+          {"role": "user", "content": "What is the relationship between '%s' and '%s', in a biochemical context, if any?"%(sub, obj)}
+      ]
 
     completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
+    model="gpt-4-turbo",
     messages=prompt
     )
     response = str(completion.choices[0].message.content)
     return(response, prompt)
 
 
+def testy_test(statements, sub, obj, messages):
+    prompt = [{"role": "user", "content": """
+    Task:
+    You are a helpful assistant. Which of these statements best describes the relationship between %s and %s? Return only the number associated with the best statement, with no additional commentary. If the relationship cannot be clearly and readily described by the statements present, please return "no relationship". It is better to retrun "no relationship" than an inaccurate description. The relationships between subjects and objects are characterized by verbs, and the directions of these statments are criticial. For example just because "subject verbs object" is true does not mean that "object verbs subject" is also true.
+    Example Input Format:
+    1. Statement 
+    2. Statement
+    3. Statement
+    Example Output Format:
+    3
+    Input: 
+    %s"""%(sub, obj, statements)}]
+    messages.extend(prompt)
+
+    completion = client.chat.completions.create(
+    model="gpt-4-turbo",
+    messages=messages
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+def grammatical_check(prompt):
+    completion = client.chat.completions.create(
+    model="gpt-4",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
 
 def synonym_context(word1, word2, paragraph):
     prompt =[
@@ -229,147 +226,6 @@ def extract_mech_path(paragraph, drug, disease):
     response = str(completion.choices[0].message.content)
     return(response, prompt)
 
-
-def extract_predicates(paragraph, entities, predicates):
-    prompt =[
-          {"role": "system", "content": 
-           """
-           Task:
-           Your task is to extract semantic triplets from the given paragraph. Each triplet consists of a subject, a predicate, and an object. A list of controlled predicates will be provided. The predicate must be selected from the provided list. A list of key entities that are subjects and objects is provided as input, however triplets may include subjects and objects not given the list of input entities. Please focus on extracting triplets that use the input entities as subjects and objects, and extract as many triplets as possible. If no triplets are found, please return "no triplets". Do not return any additional commentary.
-
-           Example Input:
-           Paragraph: NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. It has been know to also treat inflammation. 
-           Predicates:capable of
-           enabled by
-           produces
-           caused by
-           treats
-           interacts with
-           negatively regulates
-           Entities:NSAIDs
-           ibuprofen
-           COX
-        
-           Example Output:
-           ibuprofen - negatively regulates - cyclooxygenase enzymes
-           ibuprofen - interacts with - cyclooxygenase enzymes
-           NSAIDs - negatively regulates - cyclooxygenase enzymes
-           NSAIDs - interacts with - cyclooxygenase enzymes
-           ibuprofen - interacts with - COX-1
-           ibuprofen - interacts with - COX-2
-           NSAIDs - interacts with - COX-1
-           NSAIDs - interacts with - COX-2
-           aspirin - interacts with - COX-1
-           aspirin - interacts with - COX-2
-           indomethacin - interacts with - COX-1
-           indomethacin - interacts with - COX-2
-           ibuprofen - negatively regulates - COX-1
-           ibuprofen - negatively regulates - COX-2
-           NSAIDs - negatively regulates - COX-1
-           NSAIDs - negatively regulates - COX-2
-           aspirin - negatively regulates - COX-1
-           aspirin - negatively regulates - COX-2
-           indomethacin - negatively regulates - COX-1
-           indomethacin - negatively regulates - COX-2
-           ibuprofen - treats - headaches
-           ibuprofen - treats - inflammation
-           """},
-          {"role": "user", "content": "Paragraph:%s\nEntities:%sPredicates:%s"%(paragraph, entities, predicates)}
-      ]
-
-
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
-def test(paragraph, drug, disease):
-    prompt =[
-          {"role": "system", "content": 
-           """
-           Task:
-           Given a paragraph of text, an input entitiy, and an output entity, please explain how the input entity is connected to the output entity. Do not return any additional commentary.
-
-           Example Input
-           Paragraph: Gastroesophageal reflux disease (GERD) or gastro-oesophageal reflux disease (GORD) is a chronic upper gastrointestinal disease in which stomach content persistently and regularly flows up into the esophagus, resulting in symptoms and/or complications. The most common symptoms of GERD in adults are an acidic taste in the mouth, regurgitation, and heartburn.[16] Less common symptoms include pain with swallowing/sore throat, increased salivation (also known as water brash), nausea,[17] chest pain, coughing, and globus sensation.[18] The acid reflux can induce asthma attack symptoms like shortness of breath, cough, and wheezing in those with underlying asthma.[18] Omeprazole is a selective and irreversible proton pump inhibitor. It suppresses stomach acid secretion by specific inhibition of the H+/K+-ATPase system found at the secretory surface of gastric parietal cells. Because this enzyme system is regarded as the acid (proton, or H+) pump within the gastric mucosa, omeprazole inhibits the final step of acid production.[50] Omeprazole also inhibits both basal and stimulated acid secretion irrespective of the stimulus[51] as it blocks the last step in acid secretion.[51] The drug binds non-competitively so it has a dose-dependent effect.[52] The inhibitory effect of omeprazole occurs within 1 hour after oral administration. The maximum effect occurs within 2 hours. The duration of inhibition is up to 72 hours. When omeprazole is stopped, baseline stomach acid secretory activity returns after 3 to 5 days. The inhibitory effect of omeprazole on acid secretion will plateau after 4 days of repeated daily dosing.[53]
-           Starting:Omeprazole
-           Ending:Gastroesophageal Reflux Disease 
-
-           Example Output:
-           Omeprazole supresses stomach acid secretion by inihibiting the H+/K+-ATPase system found on the secretary surface of gastic parietal cells. This inihibits the final step of acid production.
-           """},
-          {"role": "user", "content": "Paragraph:%s\nStarting:%s\nEnding:%s"%(paragraph, drug, disease)}
-      ]
-
-
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
-
-def sentence_tense(sentence, pos):
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-          {"role": "system", "content": 
-           """
-           Task:
-           You will be given a sentence, and the parts of speech for every word in that paragraph in the same order. Please rewrite the sentence so that no past tense or past participle verbs occur. Do not add any additional commentary or spacing.
-
-           Example Input 1:
-           Paragraph- John went to a crowded grocery store. He bought apples. He then ate the green apples.
-           Parts of Speech- proper noun;verb past tense;infinite marker;determiner;verb past participle;noun;noun;personal pronoun;verb past tense;noun plural;personal pronoun;adverb;verb;determiner;adjective;noun plural;
-
-           Example Output 1:
-           John goes to a crowded grocery store. He buys apples. He eats the green apples.
-           """},
-          {"role": "user", "content": "Paragraph- %s\nParts of Speech- %s"%(sentence, pos)}
-      ]
-    )
-    response = str(completion.choices[0].message.content)
-    return(response)
-
-def triplets(text, entities):
-    prompt=[
-          {"role": "system", "content": 
-           """
-           Task:
-           Your task is to extract semantic triplets from the given paragraph. Each triplet consists of a subject, a predicate, and an object. A list of key entities that are subjects and objects is provided as input. These entities are the only possible subjects and objects. If no triplets are found, please return "no triplets". Do not return any additional commentary.
-           Example Input:
-           Paragraph:NSAIDs such as ibuprofen work by inhibiting the cyclooxygenase (COX) enzymes, which convert arachidonic acid to prostaglandin H2 (PGH2). PGH2, in turn, is converted by other enzymes to several other prostaglandins (which are mediators of pain, inflammation, and fever) and to thromboxane A2 (which stimulates platelet aggregation, leading to the formation of blood clots). Like aspirin and indomethacin, ibuprofen is a nonselective COX inhibitor, in that it inhibits two isoforms of cyclooxygenase, COX-1 and COX-2. Based on this mechanism, headaches are treated by ibuprofen. It has been know to also treat inflammation. 
-           Entities:NSAIDs
-           ibuprofen
-           COX-1
-           COX-2
-           COX enzymes
-
-           Example Output:
-           ibuprofen - is a - NSAIDs
-           ibuprofen - inhibits - COX enzymes
-           NSAIDs - inhibits - COX enzymes
-           ibuprofen - inhibits - COX-1
-           ibuprofen - inhibits - COX-2
-           NSAIDs - inhibits - COX-1
-           NSAIDs - inhibits - COX-2
-           ibuprofen - inhibits - COX-1
-           ibuprofen - inhibits - COX-2
-           NSAIDs - inhibits - COX-1
-           NSAIDs - inhibits- COX-2
-           """},
-          {"role": "user", "content": "Paragraph:%s\nEntities:%s"%(text, entities)}
-      ]
-
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
 
 def sentence_pos_replacement(sentence, pos):
     completion = client.chat.completions.create(

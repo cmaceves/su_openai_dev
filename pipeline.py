@@ -21,15 +21,16 @@ import prompts
 categories = ["protien", "receptor", "enzyme", "cell", "disease", "gene family", "endogenous small molecule"]
 
 def extract_triplicates(predicate_json, abstract, triplet_file):
-    if os.path.isfile(triplet_file):
-        return
+    #if os.path.isfile(triplet_file):
+    #    return
     #once we have entities categorized, we want to extract the predicate relationships from the text
     
     with open(predicate_json, 'r') as jfile:
         data = json.load(jfile)
     with open(abstract, "r") as afile:
         abstracts = json.load(afile)['abstracts']
-
+    if len(abstracts) == 0:
+        return
     #get possible parts of speech
     pos_tag_df = pd.read_table("pos_tag.tsv",sep=";")
     parts_of_speech = {}
@@ -45,8 +46,14 @@ def extract_triplicates(predicate_json, abstract, triplet_file):
     #extract the triplicates
     triplet_dict = {}
     for i, (pmid, text_body) in enumerate(abstracts.items()):  
-        if pmid != "9264044":
-            continue
+        print(pmid)
+        text_body = prompts.text_tense(text_body)
+        text_body = prompts.shorten_sentences(text_body)
+        text_body = prompts.replace_pronouns(text_body)
+        print(text_body)
+        triplets = prompts.triplets(text_body)
+        print(triplets.lower())
+        continue
         sentences = text_body.split(".")    
         all_triplets = []
         for i, sentence in enumerate(sentences):
@@ -56,13 +63,18 @@ def extract_triplicates(predicate_json, abstract, triplet_file):
             for word in pos_tags:
                 if word[1] in parts_of_speech:
                     pos += parts_of_speech[word[1]] + ";"
-            sentence = prompts.sentence_tense(sentence, pos)
+            #sentence = prompts.sentence_tense(sentence, pos)
+
             triplets = prompts.triplicates(sentence)
-            triplets = triplets.split('\n')
-            print(sentence)
+            triplets = triplets.lower()
             print(triplets)
+            triplets = triplets.split('\n')
+            #print(sentence)
+            #print(triplets)
+            
             all_triplets.extend(triplets)
         triplet_dict[pmid] = all_triplets
+    sys.exit(0)
     with open(triplet_file, "w") as jfile:
         json.dump(triplet_dict, jfile)
 
@@ -142,7 +154,6 @@ def categorize_entities(ce, all_entities):
 def pull_entities(es, abstract):
     if os.path.isfile(es):
         return
-
     print("extracting entities")
     all_entities = {}
     all_contexts = {}
@@ -151,6 +162,7 @@ def pull_entities(es, abstract):
     if 'abstracts' not in data:
         return
     for i, (key, initial_text) in enumerate(data['abstracts'].items()):
+        print("pulling entities %s of %s" %(str(i), str(len(data['abstracts']))))
         for j in range(1):
             entities = prompts.entity_query(initial_text)
             try:
@@ -159,9 +171,9 @@ def pull_entities(es, abstract):
                 continue
             entities = [x.lower() for x in entities]
             contexts = []
-            for entity in entities:
-                resp = prompts.entity_context(initial_text, entity)
-                contexts.append(resp)
+            #for entity in entities:
+            #    resp = prompts.entity_context(initial_text, entity)
+            #    contexts.append(resp)
             all_entities[key] = entities
             all_contexts[key] = contexts
     with open(es, "w") as jfile:
@@ -293,9 +305,9 @@ def main():
     solution_names = parse_solutions(indication_json, solution_df)
 
     for i, (index, row) in enumerate(solution_df.iterrows()):
-        if index > 5:
-            break
-
+        #if index > 5:
+        #    break
+    
         solution_steps = solution_df.iloc[index].tolist()
         """
         solution_identifiers = []
@@ -341,8 +353,8 @@ def main():
         #print(resp.json())
         term_string = solution_identifiers[0] + " " + solution_identifiers[-1] + " mechanism"
         term_list = [solution_identifiers[0], solution_identifiers[-1]]
+        print(solution_identifiers)
         expansion(term_string, term_list, literature_dir, num_abstracts, predicate_json)
-        sys.exit(0)
     
     """
     for original_identifier in term_list:

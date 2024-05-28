@@ -10,6 +10,7 @@ import pickle
 import requests
 import pandas as pd
 import numpy as np
+from itertools import permutations
 from joblib import Parallel, delayed
 import nltk
 from nltk.corpus import stopwords
@@ -19,8 +20,8 @@ from openai import OpenAI
 from normalize import get_normalizer #taken from Benchmarks
 import pull_down_literature
 import prompts
+from line_profiler import LineProfiler
 from wikidata.client import Client
-from nltk.stem import WordNetLemmatizer
 lemmatizer = WordNetLemmatizer()
 categories = ["protien", "receptor", "enzyme", "cell", "disease", "gene family", "endogenous small molecule"]
 
@@ -109,6 +110,81 @@ def find_predicates(predicate_data, entity_data, sub_types, obj_types):
             predicate_list.append(key)
     return(predicate_list)
 
+def find_standard_predicate(perm, grounded_types, predicate_restrictions, record_predicate_def):
+    sub = perm[0]
+    obj = perm[1]
+    sub_types = []
+    obj_types = []
+    if sub in grounded_types:
+        sub_types = grounded_types[sub]
+    if obj in grounded_types:
+        obj_types = grounded_types[obj]
+    sub_types = [x.replace("biolink:","") for x in np.unique(sub_types)]
+    obj_types = [x.replace("biolink:","") for x in np.unique(obj_types)]
+
+    predicate_list = []
+    static_mappings = {"SmallMolecule":"Drug"}
+    sub_types = [static_mappings[x] if x in static_mappings else x for x in sub_types]
+    obj_types = [static_mappings[x] if x in static_mappings else x for x in obj_types]
+    
+    for key, value in predicate_restrictions.items():
+        for val in value:
+            if len(sub_types) > 1 and len(obj_types) > 1:
+                if val[0] in sub_types and val[1] in obj_types:
+                    if key not in predicate_list:
+                        predicate_list.append(key)
+            elif len(sub_types) > 1 and len(obj_types) == 0:
+                if val[0] in sub_types:
+                    predicate_list.append(key)
+            elif len(obj_types) > 1 and len(sub_types) == 0:
+                if val[1] in obj_types:
+                    predicate_list.append(key)
+            else:
+                predicate_list.append(key)
+    predicate_list = list(np.unique(predicate_list))
+    statement_string = ""
+    statement_numbers = []
+    counter = 0
+
+    #this limits the number of predicate with a first pass
+    kept_predicates = []
+    for i, predicate in enumerate(predicate_list):
+        statement = sub + " " + predicate + " " + obj
+        resp, prompt = prompts.describe_accuracy(statement)
+        if resp.lower() == "yes":
+            print(bcolors.HEADER + resp, bcolors.OKGREEN + str(statement))
+            kept_predicates.append(predicate)
+
+    for i, predicate in enumerate(kept_predicates):
+        statement = sub + " " + predicate + " " + obj
+        if counter != 0:
+            statement_string += "\n"
+        statement_string += str(counter+1) + ". " + statement
+        statement_numbers.append(predicate)
+        counter += 1
+        
+    if len(statement_numbers) == 0:
+        return(None)
+    
+    messages = [{"role":"system", "content":"You are a helpful assisant with biochemical and biomedical knowledge."}]
+    for predicate in statement_numbers:
+        messages.extend(record_predicate_def[predicate])
+    describe, prompt = prompts.describe_relationship(sub, obj)
+    messages.append({"role": "user", "content": "What is the relationship between '%s' and '%s'?"%(sub, obj)})
+    messages.append({"role":"assistant", "content": "%s"%describe})
+    resp, prompt = prompts.testy_test(statement_string, sub, obj, messages)
+    if resp != 'no relationship': 
+        try:
+            found_statement = statement_numbers[int(resp)-1]
+        except:
+            return(None)
+        #print(bcolors.OKGREEN + describe)
+        #print(bcolors.OKGREEN + sub, bcolors.HEADER + statement_numbers[int(resp)-1], bcolors.OKGREEN + obj)
+        return([sub, found_statement, obj])
+    else:
+        #print(bcolors.OKBLUE + "failure", bcolors.OKBLUE + sub, bcolors.OKBLUE + obj)
+        return(None)
+
 def grounded_type(grounded, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
     grounded_type = {}
     for key, value in grounded.items():
@@ -152,7 +228,6 @@ def ground_synonym(term):
     redirect = False
     redirect_term = ""
     wikibase_id = ""
-    #print(bcolors.OKBLUE + term)
     for i, paragraph in enumerate(soup.find_all("p")):
         if paragraph.text.strip() == "Redirect to:":
             for a in soup.find_all("a"):
@@ -173,7 +248,7 @@ def ground_synonym(term):
         print(data)
         print(term, "bool redirect", redirect, "redirect", redirect_term)
         sys.exit(1)
-
+    
     for value in data['parse']['properties']:
         if value['name'] == 'wikibase_item':
             wikibase_id = value['*']
@@ -186,17 +261,16 @@ def ground_synonym(term):
         return("", "", "", "")
     wiki_client = Client() 
     wiki_entity = wiki_client.get(wikibase_id, load=True)
-    for x in wiki_entity.keys():
-        child = wiki_client.get(x.id)
-        label = str(child.label).strip()
+    for x in wiki_entity.iterlists():
+        label = str(x[0].label)
         if label == "MeSH descriptor ID":
-            mesh_id = wiki_entity.getlist(child)
+            mesh_id = x[1]
         if label == "UniProt protein ID":
-            uniprot = wiki_entity.getlist(child)
+            uniprot = x[1]
         if label == "Mondo ID":
-            mondo = wiki_entity.getlist(child)
+            mondo = x[1]
         if label == "Human Phenotype Ontology ID":
-            hpo = wiki_entity.getlist(child)
+            hpo = x[1]
     return(mesh_id, uniprot, mondo, hpo)
 
 
@@ -229,6 +303,8 @@ def matched_wikipedia_pages(entity):
     }
     resp = requests.get(url=url, params=params)
     loose_data = resp.json()
+    print(loose_data)
+    sys.exit(0)
     useful = []
     if len(loose_data) < 2:
         return({})
@@ -238,9 +314,14 @@ def matched_wikipedia_pages(entity):
         print(entity)
         print("failure", loose_data)
         sys.exit(1)
+
     for possible_match in loose_data[1]:
-        #print(bcolors.OKGREEN + "possible match", bcolors.OKGREEN + entity, possible_match)
-        if possible_match.lower() == entity.lower():
+        possible_match_compare = [lemmatizer.lemmatize(x, pos='n') for x in possible_match.lower().split(" ")]
+        possible_match_compare = " ".join(possible_match_compare)
+        entity_compare = [lemmatizer.lemmatize(x.lower(), pos='n') for x in entity.lower().split(" ")]
+        entity_compare = " ".join(entity_compare)
+        #print("here"+bcolors.OKBLUE, bcolors.OKGREEN+possible_match, bcolors.OKGREEN+entity, bcolors.HEADER + possible_match_compare, bcolors.HEADER + entity_compare)
+        if possible_match_compare == entity_compare:
             useful_pages.append(possible_match)
     return({"entity":entity, "pages": useful_pages})
 
@@ -363,7 +444,7 @@ def get_mechanism(term1, term2):
 def alternate_path(term1, term2, predicate_data, filename):
     """
     1. Use both terms to query wikipedia, and derive a mechanism and important entities.
-    2. Exapnd the entities to synonyms.
+    2. Expand the entities to synonyms.
     3. Ground entities and their synonyms.
     """
     if os.path.isfile(filename):
@@ -404,7 +485,7 @@ def alternate_path(term1, term2, predicate_data, filename):
         synonym_dict = output_data['synonyms']
 
     #find wikipedia pages for synonyms
-    wiki = True
+    wiki = False
     if wiki:
         synonym_pages_dict = {}
         pooled_synonyms = []
@@ -428,12 +509,8 @@ def alternate_path(term1, term2, predicate_data, filename):
     else:
         synonym_pages_dict = output_data['synonym_pages']
 
-    with open(filename, 'w') as jfile:
-        json.dump(output_data, jfile)
-
-    sys.exit(0)
-
     #ground using wikipedia pages
+    ground = False
     if ground:
         synonym_groundings = {}
         for key, value in synonym_pages_dict.items():
@@ -442,87 +519,25 @@ def alternate_path(term1, term2, predicate_data, filename):
             for entity in value:
                 if entity in synonym_groundings[key]:
                     continue
+                print(entity)
                 mesh_id, uniprot, mondo, hpo = ground_synonym(entity) 
                 print(bcolors.OKBLUE + key, bcolors.OKCYAN + entity)
                 print(bcolors.HEADER + str(mesh_id), uniprot, mondo, hpo)
                 synonym_groundings[key][entity] = [mesh_id, uniprot, mondo, hpo]
-        
-    grounded_types = grounded_type(synonym_groundings) 
+        output_data['grounded'] = synonym_groundings
+    else:
+        synonym_groundings = output_data['grounded']
 
-    entity_list = entities.split(", ")
-    entity_string = ""
-    for entity in entity_list:
-        entity_string += entity + "\n"
-    print(entity_string)
-    resp, prompt = prompts.triplets(mechanism, entity_string) 
-    triplets = resp.split("\n")
-    print(mechanism)
-    print(bcolors.OKBLUE + resp)
+    #type the identifiers that we've grounded on
+    type_ground = False
+    if type_ground:      
+        grounded_types = grounded_type(synonym_groundings) 
+        output_data['grounded_type'] = grounded_types
+    else:
+        grounded_types = output_data['grounded_type']
 
-    with open("test_json.json", "w") as jfile:
-        json.dump({"grounded":synonym_groundings, "grounded_types": grounded_types, "entities":entities, "mechansim":mechanism, "text":paragraph, "triplets": triplets}, jfile)
-    sys.exit(0)
-
-    #additional information
-    useful_expansions = corresponding_pages(entity_list, mechanism)
-    print(bcolors.OKCYAN + "Useful supporting wikipedia pages")
-    print(bcolors.OKCYAN + str(useful_expansions))
-    additional_text = get_additional_text(useful_expansions, term1, term2, mechanism)
-    print(additional_text)
-
-    #re-extract the mechanism of action
-    response, prompt = prompts.extract_mech_path(additional_text , term1, term2)
-    print(bcolors.HEADER + response)
-
-    sys.exit(0)
-
-    entity_string = ""
-    grounded_ids = {}
-    all_supporting_information = ""
-    print(bcolors.HEADER + str(entity_list))
-    #this expands to provide additional supporting information
-    for i, entity in enumerate(entity_list):
-        if i != 0:
-            entity_string += "\n"
-        entity_string += entity
-        #print("\n", bcolors.OKBLUE + entity + bcolors.OKBLUE) 
-        text_all = loose_query_wikipedia(entity)
-        t = ""
-        for key, value in text_all.items():
-            
-            t += value + " "
-        print(entity)
-        print(t)
-        additional_information = summarize(t, term1, term2, mechanism)
-        all_supporting_information += additional_information
-        #print(bcolors.OKCYAN + "additional info " + bcolors.OKCYAN , bcolors.OKCYAN + additional_information + bcolors.OKCYAN)
-    sys.exit(0)
-    #print(bcolors.HEADER + all_supporting_information + bcolors.HEADER)
-    response, prompt = prompts.extract_mech_path(all_supporting_information, term1, term2)
-    response_list = response.split("\n")
-    final_mech = response_list[0].replace("Mechanism: ", "")
-    final_entities = response_list[-1].replace("Relevant Entities: ","")
-    final_entity_list = final_entities.split(", ")
-    final_entity_list = [x.lower() for x in final_entity_list]
-    final_entity_list = expand_entities(final_entity_list)
-    print(final_entity_list)
-    print(bcolors.OKBLUE + response)
-    sys.exit(0)
-    #final_entity_list = entity_list
-    #ground using pubtator?
-    #ground_pubtator(final_entity_list)
-
-
-    for i, entity in enumerate(final_entity_list):
-        if entity not in grounded_ids:
-            grounded_ids[entity] = query_wikipedia_mesh(entity) 
-    print(bcolors.OKGREEN + "response", bcolors.OKGREEN + response)
-    print(grounded_ids)
-    sys.exit(0)
-    first_check = {"mechanism":mechanism, "entities":entity_list, "grounded":grounded_ids, "all_supporting_info":all_supporting_information, "final_mech":final_mech, "final_entities":final_entities}
-    print(bcolors.OKBLUE + str(grounded_ids))
-    return(first_check) 
-    
+    with open(filename, 'w') as jfile:
+        json.dump(output_data, jfile)
 
 def query_wikipedia_mesh(term):
     """
@@ -742,11 +757,13 @@ def main():
     solution_df = pd.read_table(solution_filename)
     num_abstracts = 20
     predicate_json = "./predicates/predicates.json"
+    predicate_definitions = "./predicates/predicate_definitions.json" #created by ChatGPT
     entity_json = "./predicates/entities.json"
     name_lookup_url = "https://name-lookup.transltr.io/lookup"
     indication_json = "./indication_paths.json"
     literature_dir = "./wiki_text"
     solution_names = parse_solutions(indication_json, solution_df)
+
     with open("indication_paths.json", "r") as jfile:
         data = json.load(jfile)
 
@@ -778,6 +795,26 @@ def main():
     with open(predicate_json, "r") as jfile:
         predicate_data = json.load(jfile)
 
+    #here we have ChatGPT define all our predicates, and then dump the responses to a json file
+    need_def_predicates = False
+    if need_def_predicates:
+        record_predicate_def = {}
+        #define all the possible predicates
+        for i, predicate in enumerate(list(predicate_restrictions.keys())):
+            messages = [{"role": "system", "content": "You are a helpful assistant."}]
+            template = {"role": "user", "content": "What does '%s' mean?"%predicate}
+            messages.append(template)
+            resp, prompt = prompts.grammatical_check(messages)
+            other_template = {"role":"assistant", "content":"%s"%resp}
+            messages.append(other_template)
+            record_predicate_def[predicate] = messages[1:]
+
+        with open(predicate_definitions, 'w') as pfile:
+            json.dump(record_predicate_def, pfile) 
+    else:
+        with open(predicate_definitions, 'r') as pfile:
+            record_predicate_def = json.load(pfile)
+
     for i, (index, row) in enumerate(solution_df.iterrows()):
         #print(i, "of", len(solution_df), "done.") 
         if i != 1:
@@ -799,105 +836,36 @@ def main():
         #    continue
         print("\n")
         print(bcolors.HEADER + str(solution_identifiers) + bcolors.HEADER)
-        first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_data, "test_json.json")
-        sys.exit(0)
+        #first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_data, "test_json.json")
+        #sys.exit(0)       
 
         with open("test_json.json", "r") as jfile:
             data = json.load(jfile)
-        mechanism = data['mechansim']
+        mechanism = data['mechanism']
         entities = data['entities']
         grounded = data['grounded']
-        grounded_types = data['grounded_types']
-        triples = data['triplets']
+        grounded_types = data['grounded_type']
         print(bcolors.OKCYAN + mechanism)
-        print(bcolors.OKBLUE + entities)
-
-        grounded_types = grounded_type(grounded)
-        print(grounded_types)
-        print(grounded)
-        sys.exit(0)
-        predicate_string = ""
+        print(bcolors.OKBLUE + str(entities))
         entity_string = ""
         for i,entity in enumerate(entities):
             if i != 0:
                 entity_string += "\n"
             entity_string += entity
 
-        for i, (key, value) in enumerate(predicate_data.items()):
-            if i != 0:
-                predicate_string += "\n"
-            predicate_string += key
-
-        possible_predicates = {}
-        for triple in triples:
-            triple_list = triple.split(" - ")
-            sub_val = triple_list[0]
-            obj_val = triple_list[-1].rstrip()
-            key_pair = sub_val + "_" + obj_val
-            if key_pair in possible_predicates:
-                continue
-            print(bcolors.HEADER + sub_val, bcolors.OKBLUE + triple_list[1], bcolors.OKCYAN + obj_val)
-
-            #get the subject type
-            if sub_val.lower() in grounded_types:
-                sub_types = grounded_types[sub_val.lower()]
+        #given a set of entities, lets explore the relationship between each of them
+        perm = permutations(entities, 2)
+        unique_permutations = set(perm)
+        triplets = []
+        for perm in unique_permutations:
+            triple = find_standard_predicate(perm, grounded_types, predicate_restrictions, record_predicate_def)
+            if triple is not None:
+                triplets.append(triple)
+                print(bcolors.OKBLUE + str(triple))
             else:
-                sub_types = []            
-            #get the object type
-            if obj_val.lower() in grounded_types:
-                obj_types = grounded_types[obj_val.lower()]
-            else:
-                obj_types = []
-            sub_types = [x.replace("biolink:","") for x in np.unique(sub_types)]
-            obj_types = [x.replace("biolink:","") for x in np.unique(obj_types)]
-
-            predicate_list = []
-            static_mappings = {"SmallMolecule":"Drug"}
-            sub_types = [static_mappings[x] if x in static_mappings else x for x in sub_types]
-            obj_types = [static_mappings[x] if x in static_mappings else x for x in obj_types]
-            for key, value in predicate_restrictions.items():
-                for val in value:
-                    if val[0] in sub_types and val[1] in obj_types:
-                        if key not in predicate_list:
-                            predicate_list.append(key)
-            print(grounded_types)
-            if len(predicate_list) == 0:
-                print("subject types", sub_types)
-                print("object types", obj_types)
-                print("heree")
-                continue
-            print("subject types", sub_types)
-            print("object types", obj_types)
-            print(grounded_types.keys())
-            print(obj_val.lower())
-            print(predicate_list)
-            """
-            predicate_list = find_predicates(predicate_data, entity_data, sub_types, obj_types)
-            predicate_string = ""
-            for j,predicate in enumerate(predicate_list):
-                if j != 0:
-                    predicate_string += "\n"
-                predicate_string += predicate
-            """
-            possible = []  
-            sys.exit(0)
-            print(len(drug_mech_predicates))
-
-            for predicate in drug_mech_predicates:
-                statement = sub_val + " " + predicate + " " + obj_val
-                resp, prompt = prompts.standardize_predicates(statement)
-                print(bcolors.HEADER + statement, bcolors.OKCYAN + resp)
-            print(sub_val, obj_val, predicate)
-            sys.exit(0)
-            continue
-            sys.exit(0)
-            #possible_predicates[key_pair] = possible
-            #print(possible)
-        print(possible_predicates)
-        sys.exit(0)
-
-        #triples, prompt  = prompts.extract_predicates(paragraph, entity_string, predicate_string)
-        sys.exit(0)
+                print(bcolors.HEADER + "failure", str(perm))
+        print(triplets)
+        sys.exit(0)       
         with open(output_filename, 'w') as jfile:
             json.dump(first_check, jfile)
         #print_done_work(output_filename, solution_identifiers)
