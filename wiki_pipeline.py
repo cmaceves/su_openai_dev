@@ -3,27 +3,36 @@ import os
 import sys
 import ast
 import copy
-from bs4 import BeautifulSoup
+import nltk
 import bioc
 import json
 import pickle
 import requests
 import pandas as pd
 import numpy as np
+
+import prompts
+import pull_down_literature
+
+from bs4 import BeautifulSoup
 from itertools import permutations
 from joblib import Parallel, delayed
-import nltk
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from fuzzywuzzy import fuzz
 from openai import OpenAI
-from normalize import get_normalizer #taken from Benchmarks
-import pull_down_literature
-import prompts
 from line_profiler import LineProfiler
 from wikidata.client import Client
+
 lemmatizer = WordNetLemmatizer()
-categories = ["protien", "receptor", "enzyme", "cell", "disease", "gene family", "endogenous small molecule"]
+
+def wrapper_for_predicates(all_statements, predicate_list):
+    kept_predicates = []
+    response = Parallel(n_jobs=15)(delayed(prompts.describe_accuracy)(statement) for statement in all_statements) 
+    for pred, resp in zip(predicate_list, response):
+        if resp[0].lower() == "yes":
+            kept_predicates.append(pred)
+    return(kept_predicates)
 
 def expand_entity_tree(entity_types, entity_data):
     """
@@ -36,12 +45,15 @@ def expand_entity_tree(entity_types, entity_data):
             all_categories.extend(entity_data[entity])
     return(all_categories)
 
+
 def camel_case_to_words(camel_case):
+    #not currently in use, need better biolink predicate restrictions
     words = re.findall(r'[A-Z](?:[a-z]+|[A-Z]*(?=[A-Z]|$))', camel_case)
     new_word = ' '.join(words)
     return new_word.lower()
 
 def find_predicates(predicate_data, entity_data, sub_types, obj_types):
+    #not currently in use, need better biolink predicate restrictions
     predicate_list = []
     translated_sub = []
     for sub in sub_types:
@@ -110,7 +122,7 @@ def find_predicates(predicate_data, entity_data, sub_types, obj_types):
             predicate_list.append(key)
     return(predicate_list)
 
-def find_standard_predicate(perm, grounded_types, predicate_restrictions, record_predicate_def):
+def find_standard_predicate(perm, grounded_types, predicate_restrictions, record_predicate_def, describe):
     sub = perm[0]
     obj = perm[1]
     sub_types = []
@@ -147,14 +159,13 @@ def find_standard_predicate(perm, grounded_types, predicate_restrictions, record
     counter = 0
 
     #this limits the number of predicate with a first pass
-    kept_predicates = []
+    all_statements = []
     for i, predicate in enumerate(predicate_list):
         statement = sub + " " + predicate + " " + obj
-        resp, prompt = prompts.describe_accuracy(statement)
-        if resp.lower() == "yes":
-            print(bcolors.HEADER + resp, bcolors.OKGREEN + str(statement))
-            kept_predicates.append(predicate)
+        all_statements.append(statement)
+    kept_predicates = wrapper_for_predicates(all_statements, predicate_list)
 
+    #pick the best from the smaller list
     for i, predicate in enumerate(kept_predicates):
         statement = sub + " " + predicate + " " + obj
         if counter != 0:
@@ -165,12 +176,11 @@ def find_standard_predicate(perm, grounded_types, predicate_restrictions, record
         
     if len(statement_numbers) == 0:
         return(None)
-    
     messages = [{"role":"system", "content":"You are a helpful assisant with biochemical and biomedical knowledge."}]
     for predicate in statement_numbers:
         messages.extend(record_predicate_def[predicate])
-    describe, prompt = prompts.describe_relationship(sub, obj)
-    messages.append({"role": "user", "content": "What is the relationship between '%s' and '%s'?"%(sub, obj)})
+    #describe, prompt = prompts.describe_relationship(sub, obj)
+    messages.append({"role": "user", "content": "How does '%s' relate to '%s'?"%(sub, obj)})
     messages.append({"role":"assistant", "content": "%s"%describe})
     resp, prompt = prompts.testy_test(statement_string, sub, obj, messages)
     if resp != 'no relationship': 
@@ -303,8 +313,6 @@ def matched_wikipedia_pages(entity):
     }
     resp = requests.get(url=url, params=params)
     loose_data = resp.json()
-    print(loose_data)
-    sys.exit(0)
     useful = []
     if len(loose_data) < 2:
         return({})
@@ -432,7 +440,6 @@ def get_mechanism(term1, term2):
         paragraph2 += sentence.strip() + ". "
     
     paragraph = paragraph1 + " " + paragraph2
-
     response, prompt = prompts.extract_mech_path(paragraph, term1, term2)
     response_list = response.split("\n")
     mechanism = response_list[0].replace("Mechanism: ", "")
@@ -454,8 +461,9 @@ def alternate_path(term1, term2, predicate_data, filename):
         output_data = {}
     
     #get mechanism and entities
-    mech = False
+    mech = True
     if mech:
+        print("mech!")
         mechanism, entity_list = get_mechanism(term1, term2)
         output_data['mechanism'] = mechanism
         output_data['entities'] = entity_list
@@ -464,29 +472,31 @@ def alternate_path(term1, term2, predicate_data, filename):
         entity_list = output_data['entities']
 
     #expand entities to synonyms
-    syn = False
+    syn = True
     if syn:
+        print("syn!")
         synonym_dict = {}
         for entity in entity_list:
             resp, prompt = prompts.synonym_prompt(entity)
             synonym_list = resp.split("\n")
             synonym_list = [x.split(". ")[1].rstrip() for x in synonym_list]
             final_synonym_list = []
-            print(bcolors.HEADER+entity, bcolors.HEADER + str(synonym_list))
+            #print(bcolors.HEADER+entity, bcolors.HEADER + str(synonym_list))
             for synonym in synonym_list:
                 resp, prompt = prompts.synonym_context(entity, synonym, mechanism)
                 if resp.lower() != "yes":
                     continue
                 final_synonym_list.append(synonym)
-                print(bcolors.OKCYAN+resp, bcolors.OKBLUE+entity, bcolors.OKGREEN+synonym)
+                #print(bcolors.OKCYAN+resp, bcolors.OKBLUE+entity, bcolors.OKGREEN+synonym)
             synonym_dict[entity] = final_synonym_list
         output_data['synonyms'] = synonym_dict
     else:
         synonym_dict = output_data['synonyms']
 
     #find wikipedia pages for synonyms
-    wiki = False
+    wiki = True
     if wiki:
+        print("wiki!")
         synonym_pages_dict = {}
         pooled_synonyms = []
         for entity, synonym_list in synonym_dict.items():
@@ -494,7 +504,6 @@ def alternate_path(term1, term2, predicate_data, filename):
             
         synonym_pages = Parallel(n_jobs=5)(delayed(matched_wikipedia_pages)(synonym) for synonym in pooled_synonyms) 
         tmp_dict = {}
-        print(synonym_pages)
         for synonym_search in synonym_pages:
             if len(synonym_search['pages']) > 0:
                 tmp_dict[synonym_search['entity']] = synonym_search['pages']
@@ -504,14 +513,14 @@ def alternate_path(term1, term2, predicate_data, filename):
                     if entity not in synonym_pages_dict:
                         synonym_pages_dict[entity] = []
                     synonym_pages_dict[entity].extend(value)
-        print(synonym_pages_dict)
         output_data['synonym_pages'] = synonym_pages_dict
     else:
         synonym_pages_dict = output_data['synonym_pages']
-
+    print("synonynm pages dict", synonym_pages_dict)
     #ground using wikipedia pages
-    ground = False
+    ground = True
     if ground:
+        print("grounding!")
         synonym_groundings = {}
         for key, value in synonym_pages_dict.items():
             if key not in synonym_groundings:
@@ -529,7 +538,7 @@ def alternate_path(term1, term2, predicate_data, filename):
         synonym_groundings = output_data['grounded']
 
     #type the identifiers that we've grounded on
-    type_ground = False
+    type_ground = True
     if type_ground:      
         grounded_types = grounded_type(synonym_groundings) 
         output_data['grounded_type'] = grounded_types
@@ -802,7 +811,7 @@ def main():
         #define all the possible predicates
         for i, predicate in enumerate(list(predicate_restrictions.keys())):
             messages = [{"role": "system", "content": "You are a helpful assistant."}]
-            template = {"role": "user", "content": "What does '%s' mean?"%predicate}
+            template = {"role": "user", "content": "What does '%s' mean for entities in a biochemical or biomedical context?"%predicate}
             messages.append(template)
             resp, prompt = prompts.grammatical_check(messages)
             other_template = {"role":"assistant", "content":"%s"%resp}
@@ -814,11 +823,10 @@ def main():
     else:
         with open(predicate_definitions, 'r') as pfile:
             record_predicate_def = json.load(pfile)
-
+    
     for i, (index, row) in enumerate(solution_df.iterrows()):
-        #print(i, "of", len(solution_df), "done.") 
-        if i != 1:
-            continue
+        print("\n")
+        print(i, "of", len(solution_df), "done.") 
         all_triples = []
         all_entities = []
         all_prompts = []
@@ -829,45 +837,39 @@ def main():
         basename = solution_identifiers[0] + "_" + solution_identifiers[-1] + ".json"
         basename = basename.replace(" ","_")
         output_filename = os.path.join(literature_dir, basename)
-        #if os.path.isfile(output_filename):
-        #    grade_grounding_step(solution_steps, output_filename)
-        #    continue
-        #else:
-        #    continue
-        print("\n")
+        if not os.path.isfile(output_filename):
+            #grade_grounding_step(solution_steps, output_filename)
+            continue
         print(bcolors.HEADER + str(solution_identifiers) + bcolors.HEADER)
-        #first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_data, "test_json.json")
-        #sys.exit(0)       
 
-        with open("test_json.json", "r") as jfile:
+        #first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_data, output_filename)
+        #continue
+        #sys.exit(0)       
+        
+        with open(output_filename, "r") as jfile:
             data = json.load(jfile)
         mechanism = data['mechanism']
         entities = data['entities']
         grounded = data['grounded']
         grounded_types = data['grounded_type']
+
+
         print(bcolors.OKCYAN + mechanism)
         print(bcolors.OKBLUE + str(entities))
-        entity_string = ""
-        for i,entity in enumerate(entities):
-            if i != 0:
-                entity_string += "\n"
-            entity_string += entity
-
         #given a set of entities, lets explore the relationship between each of them
         perm = permutations(entities, 2)
         unique_permutations = set(perm)
-        triplets = []
-        for perm in unique_permutations:
-            triple = find_standard_predicate(perm, grounded_types, predicate_restrictions, record_predicate_def)
+        triplets = [] 
+        for j,perm in enumerate(unique_permutations):
+            print(j, "of", len(unique_permutations))
+            triple = find_standard_predicate(perm, grounded_types, predicate_restrictions, record_predicate_def, mechanism)
             if triple is not None:
                 triplets.append(triple)
-                print(bcolors.OKBLUE + str(triple))
-            else:
-                print(bcolors.HEADER + "failure", str(perm))
-        print(triplets)
-        sys.exit(0)       
-        with open(output_filename, 'w') as jfile:
-            json.dump(first_check, jfile)
+                print(bcolors.OKCYAN + str(triple))
+
+        data['triplets'] = triplets
+        with open(output_filename, "w") as jfile:
+            json.dump(data, jfile)
         #print_done_work(output_filename, solution_identifiers)
         #continue 
 
