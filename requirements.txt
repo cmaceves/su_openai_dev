@@ -1,0 +1,11 @@
+requests
+pandas
+beautifulsoup4
+bioc
+joblib
+nltk
+fuzzywuzzy
+openai
+xmltodict
+biopython
+Wikidata
