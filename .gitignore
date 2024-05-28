@@ -1,4 +1,4 @@
-.openairc
 *.swp
 __pycache__
-indication_paths.json
+apikey.txt
+predicates/biolink-model.yaml
