@@ -721,18 +721,6 @@ def parse_solutions(json_file, solution_df):
             #print(solution_steps)
     return(all_names)
 
-def print_done_work(filename, solution_identifiers):
-    if not os.path.isfile(filename):
-        return
-    print(bcolors.OKGREEN + "\nstart new drug-disease-pair" + bcolors.OKGREEN) 
-    with open(filename, 'r') as jfile:
-        data = json.load(jfile)
-    for item in data['triples']:
-        for triple in item:
-            print(bcolors.OKBLUE + triple + bcolors.OKBLUE)
-    print(bcolors.OKCYAN + str(solution_identifiers) + bcolors.OKCYAN)
-    sys.exit(0)
-
 def grade_grounding_step(expected, output_filename):
     """
     Create a plot showing
@@ -758,7 +746,7 @@ def grade_grounding_step(expected, output_filename):
     print("true positives", tp)
     print("false negatives", fn)
 
-def main():
+def main():  
     client = OpenAI()
     url = "https://en.wikipedia.org/w/api.php"
     node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="
@@ -770,6 +758,7 @@ def main():
     entity_json = "./predicates/entities.json"
     name_lookup_url = "https://name-lookup.transltr.io/lookup"
     indication_json = "./indication_paths.json"
+    prompt_save_dir = "./wiki_text/prompts_used"
     literature_dir = "./wiki_text"
 
     # Get indications file from DrugMechDB
@@ -835,7 +824,6 @@ def main():
             record_predicate_def = json.load(pfile)
     
     if not os.path.exists(literature_dir):
-    # Create the directory
         os.makedirs(literature_dir)
         print(f"Directory '{literature_dir}' was created.")
     else:
@@ -872,7 +860,6 @@ def main():
         grounded = data['grounded']
         grounded_types = data['grounded_type']
 
-
         print(bcolors.OKCYAN + mechanism)
         print(bcolors.OKBLUE + str(entities))
         #given a set of entities, lets explore the relationship between each of them
@@ -889,8 +876,6 @@ def main():
         data['triplets'] = triplets
         with open(output_filename, "w") as jfile:
             json.dump(data, jfile)
-        #print_done_work(output_filename, solution_identifiers)
-        #continue 
 
 if __name__ == "__main__":
     main()
