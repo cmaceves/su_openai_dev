@@ -1,10 +1,13 @@
+import os
 import sys
 import ast
 import json
 import pandas as pd
 from openai import OpenAI
+from dotenv import load_dotenv
+load_dotenv('.env')
+apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
-
 def describe_accuracy(statement):
     prompt =[
           {"role": "system", "content": 

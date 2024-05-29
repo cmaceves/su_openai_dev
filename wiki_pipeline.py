@@ -4,7 +4,6 @@ import sys
 import ast
 import copy
 import nltk
-import bioc
 import json
 import pickle
 import requests
@@ -12,14 +11,12 @@ import pandas as pd
 import numpy as np
 
 import prompts
-import pull_down_literature
 
 from bs4 import BeautifulSoup
 from itertools import permutations
 from joblib import Parallel, delayed
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
-from fuzzywuzzy import fuzz
 from openai import OpenAI
 from line_profiler import LineProfiler
 from wikidata.client import Client
@@ -859,6 +856,8 @@ def main():
         entities = data['entities']
         grounded = data['grounded']
         grounded_types = data['grounded_type']
+        if "triplets" in data:
+            continue
 
         print(bcolors.OKCYAN + mechanism)
         print(bcolors.OKBLUE + str(entities))
