@@ -20,7 +20,7 @@ from nltk.stem import WordNetLemmatizer
 from openai import OpenAI
 from line_profiler import LineProfiler
 from wikidata.client import Client
-
+nltk.download('wordnet')
 lemmatizer = WordNetLemmatizer()
 
 def wrapper_for_predicates(all_statements, predicate_list):
@@ -458,7 +458,7 @@ def alternate_path(term1, term2, predicate_data, filename):
         output_data = {}
     
     #get mechanism and entities
-    mech = True
+    mech = False
     if mech:
         print("mech!")
         mechanism, entity_list = get_mechanism(term1, term2)
@@ -467,7 +467,6 @@ def alternate_path(term1, term2, predicate_data, filename):
     else:
         mechanism = output_data['mechanism']
         entity_list = output_data['entities']
-
     #expand entities to synonyms
     syn = True
     if syn:
@@ -477,7 +476,7 @@ def alternate_path(term1, term2, predicate_data, filename):
             resp, prompt = prompts.synonym_prompt(entity)
             synonym_list = resp.split("\n")
             synonym_list = [x.split(". ")[1].rstrip() for x in synonym_list]
-            final_synonym_list = []
+            final_synonym_list = [entity]
             #print(bcolors.HEADER+entity, bcolors.HEADER + str(synonym_list))
             for synonym in synonym_list:
                 resp, prompt = prompts.synonym_context(entity, synonym, mechanism)
@@ -489,7 +488,8 @@ def alternate_path(term1, term2, predicate_data, filename):
         output_data['synonyms'] = synonym_dict
     else:
         synonym_dict = output_data['synonyms']
-
+    print(synonym_dict)
+    #sys.exit(0)
     #find wikipedia pages for synonyms
     wiki = True
     if wiki:
@@ -514,6 +514,7 @@ def alternate_path(term1, term2, predicate_data, filename):
     else:
         synonym_pages_dict = output_data['synonym_pages']
     print("synonynm pages dict", synonym_pages_dict)
+
     #ground using wikipedia pages
     ground = True
     if ground:
@@ -692,32 +693,6 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
-def parse_solutions(json_file, solution_df):
-    all_names = []
-    with open(json_file, 'r') as jfile:
-        data = json.load(jfile)
-    for index, row in solution_df.iterrows():
-        solution_steps = solution_df.iloc[index].tolist()
-        found = False
-        for graph in data:
-            node_list = graph['nodes']
-            ids = []
-            names = []
-            for nl in node_list:
-                ids.append(nl['id'])
-                names.append(nl['name'])
-            #if "MESH:D012148" in ids and "MESH:D012148" in ids:
-            #    print("here", ids, names)
-            if len(ids) != len(solution_steps):
-                continue
-            if ids == solution_steps:
-                found = True
-                all_names.append(names)
-        if found is False:
-            all_names.append([])
-            #print(solution_steps)
-    return(all_names)
-
 def grade_grounding_step(expected, output_filename):
     """
     Create a plot showing
@@ -743,13 +718,14 @@ def grade_grounding_step(expected, output_filename):
     print("true positives", tp)
     print("false negatives", fn)
 
-def main():  
+def main(indication):  
+    """
+    indication : dict
+        Contains the indiciation graph selected to run the full pipeline on.
+    """
     client = OpenAI()
     url = "https://en.wikipedia.org/w/api.php"
     node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="
-    solution_filename = "data.tsv"
-    solution_df = pd.read_table(solution_filename)
-    num_abstracts = 20
     predicate_json = "./predicates/predicates.json"
     predicate_definitions = "./predicates/predicate_definitions.json" #created by ChatGPT
     entity_json = "./predicates/entities.json"
@@ -758,40 +734,26 @@ def main():
     prompt_save_dir = "./wiki_text/prompts_used"
     literature_dir = "./wiki_text"
 
-    # Get indications file from DrugMechDB
-    if not os.path.exists(indication_json):
-        print("Downloading indications file...")
-        indication_url = "https://raw.githubusercontent.com/SuLab/DrugMechDB/main/indication_paths.json"
-        r = requests.get(indication_url, allow_redirects=True)
-        open(indication_json, 'wb').write(r.content)
-    else:
-        print("Found local indications file...")
-
-    solution_names = parse_solutions(indication_json, solution_df)
-
-    with open("indication_paths.json", "r") as jfile:
-        data = json.load(jfile)
 
     drugmech_predicates = []
     drugmech_entities = []
     predicate_restrictions = {}
-    for graph in data:
-        for i,link in enumerate(graph['links']):
-            sub = link['source']
-            obj = link['target']
-            predicate = link['key']
-            for node in graph['nodes']:
-                if node['id'] == sub:
-                    sub_cat = node['label']
-                if node['id'] == obj:
-                    obj_cat = node['label']
-            if predicate not in predicate_restrictions:
-                predicate_restrictions[predicate] = []
-            if [sub_cat, obj_cat] not in predicate_restrictions[predicate]:
-                predicate_restrictions[predicate].append([sub_cat, obj_cat])
-            drugmech_entities.append(sub_cat)
-            drugmech_entities.append(obj_cat)
-            drugmech_predicates.append(predicate)
+    for i,link in enumerate(indication['links']):
+        sub = link['source']
+        obj = link['target']
+        predicate = link['key']
+        for node in indication['nodes']:
+            if node['id'] == sub:
+                sub_cat = node['label']
+            if node['id'] == obj:
+                obj_cat = node['label']
+        if predicate not in predicate_restrictions:
+            predicate_restrictions[predicate] = []
+        if [sub_cat, obj_cat] not in predicate_restrictions[predicate]:
+            predicate_restrictions[predicate].append([sub_cat, obj_cat])
+        drugmech_entities.append(sub_cat)
+        drugmech_entities.append(obj_cat)
+        drugmech_predicates.append(predicate)
     drug_mech_entities = list(np.unique(drugmech_entities))
     drug_mech_predicates = list(np.unique(drugmech_predicates))
 
@@ -804,6 +766,7 @@ def main():
     need_def_predicates = False
     if need_def_predicates:
         record_predicate_def = {}
+
         #define all the possible predicates
         for i, predicate in enumerate(list(predicate_restrictions.keys())):
             messages = [{"role": "system", "content": "You are a helpful assistant."}]
@@ -826,55 +789,46 @@ def main():
     else:
         print(f"Directory '{literature_dir}' already exists.")
             
-    for i, (index, row) in enumerate(solution_df.iterrows()):
-        print("\n")
-        print(i, "of", len(solution_df), "done.") 
-        all_triples = []
-        all_entities = []
-        all_prompts = []
-        solution_steps = solution_df.iloc[index].tolist()
-        solution_identifiers = [x.lower() for x in solution_names[i]]
-        if len(solution_identifiers) == 0:
-            continue
-        basename = solution_identifiers[0] + "_" + solution_identifiers[-1] + ".json"
-        basename = basename.replace(" ","_")
-        output_filename = os.path.join(literature_dir, basename)
+    all_triples = []
+    all_entities = []
+    all_prompts = []
 
-        if not os.path.isfile(output_filename):
-            #grade_grounding_step(solution_steps, output_filename)
-            continue
-            
-        print(bcolors.HEADER + str(solution_identifiers) + bcolors.HEADER)
+    #ground truth values 
+    node_identifiers = []
+    node_names = []
+    for node in indication['nodes']:
+        node_identifiers.append(node['id'])
+        node_names.append(node['name'].lower())
+    basename = node_names[0] + "_" + node_names[-1] + ".json"
+    basename = basename.replace(" ","_")
+    output_filename = os.path.join(literature_dir, basename)
+       
+    #first_check = alternate_path(node_names[0], node_names[-1], predicate_data, output_filename)
+    
+    with open(output_filename, "r") as jfile:
+        data = json.load(jfile)
 
-        #first_check = alternate_path(solution_identifiers[0], solution_identifiers[-1], predicate_data, output_filename)
-        #continue
-        #sys.exit(0)       
-        
-        with open(output_filename, "r") as jfile:
-            data = json.load(jfile)
-        mechanism = data['mechanism']
-        entities = data['entities']
-        grounded = data['grounded']
-        grounded_types = data['grounded_type']
-        if "triplets" in data:
-            continue
+    mechanism = data['mechanism']
+    entities = data['entities']
+    grounded = data['grounded']
+    grounded_types = data['grounded_type']
 
-        print(bcolors.OKCYAN + mechanism)
-        print(bcolors.OKBLUE + str(entities))
-        #given a set of entities, lets explore the relationship between each of them
-        perm = permutations(entities, 2)
-        unique_permutations = set(perm)
-        triplets = [] 
-        for j,perm in enumerate(unique_permutations):
-            print(j, "of", len(unique_permutations))
-            triple = find_standard_predicate(perm, grounded_types, predicate_restrictions, record_predicate_def, mechanism)
-            if triple is not None:
-                triplets.append(triple)
-                print(bcolors.OKCYAN + str(triple))
+    print(bcolors.OKCYAN + mechanism)
+    print(bcolors.OKBLUE + str(entities))
+    #given a set of entities, lets explore the relationship between each of them
+    perm = permutations(entities, 2)
+    unique_permutations = set(perm)
+    triplets = [] 
+    for j,perm in enumerate(unique_permutations):
+        print(j, "of", len(unique_permutations))
+        triple = find_standard_predicate(perm, grounded_types, predicate_restrictions, record_predicate_def, mechanism)
+        if triple is not None:
+            triplets.append(triple)
+            print(bcolors.OKCYAN + str(triple))
 
-        data['triplets'] = triplets
-        with open(output_filename, "w") as jfile:
-            json.dump(data, jfile)
+    data['triplets'] = triplets
+    with open(output_filename, "w") as jfile:
+        json.dump(data, jfile)
 
 if __name__ == "__main__":
     main()

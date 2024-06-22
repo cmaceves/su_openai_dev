@@ -16,17 +16,7 @@ def create_graph(entities, triplets, sub, obj):
     for triple in triplets:
         G.add_edge(triple[0], triple[2], label=triple[1])
 
-    """
-    pos = nx.spring_layout(G)  # positions for all nodes
-    nx.draw(G, pos, with_labels=True, node_color='skyblue', node_size=700, edge_color='black', font_weight='bold')
-    # Draw edge labels
-    edge_labels = nx.get_edge_attributes(G, 'label')
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
-    # Save the graph as a PNG file
-    plt.savefig("graph.png")
-    plt.show()
-    """ 
-    paths = list(nx.all_simple_paths(G, "carbinoxamine", "seasonal allergic conjunctivitis"))
+    paths = list(nx.all_simple_paths(G, sub, obj))
     return(paths)
 
 def main():
@@ -51,11 +41,22 @@ def main():
             continue
         with open(output_filename, 'r') as jfile:
             data = json.load(jfile)
-        print(data.keys())
-        sys.exit(0) 
-    
-        all_paths = create_graphs(entities, triplets, sub, obj)
+        
+        sub = solution_identifiers[0]
+        obj = solution_identifiers[-1]
+        if "triplets" not in data:
+            continue
+        triplets = data['triplets']
+        entities = data['entities']
+        #print(data.keys())
+        print("Number of Triples", len(triplets))
+        for trip in triplets:
+            print(trip)
 
+        all_paths = create_graph(entities, triplets, sub, obj)
+        print("Number of Possible Paths", len(all_paths))
+        print(data['grounded'].keys())
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
