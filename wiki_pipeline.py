@@ -23,6 +23,13 @@ from wikidata.client import Client
 nltk.download('wordnet')
 lemmatizer = WordNetLemmatizer()
 
+def camel_to_words(camel_str):
+    # Replace acronyms and consecutive uppercase letters followed by lowercase letters
+    words = re.sub('([A-Z]+)([A-Z][a-z])', r'\1 \2', camel_str)
+    # Replace lowercase or digits followed by uppercase letters
+    words = re.sub('([a-z\d])([A-Z])', r'\1 \2', words)
+    return words
+
 def wrapper_for_predicates(all_statements, predicate_list):
     kept_predicates = []
     response = Parallel(n_jobs=15)(delayed(prompts.describe_accuracy)(statement) for statement in all_statements) 
@@ -192,32 +199,52 @@ def find_standard_predicate(perm, grounded_types, predicate_restrictions, record
         #print(bcolors.OKBLUE + "failure", bcolors.OKBLUE + sub, bcolors.OKBLUE + obj)
         return(None)
 
-def grounded_type(grounded, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
+def grounded_type(grounded, name_lookup_url, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
     grounded_type = {}
     for key, value in grounded.items():
         if key not in grounded_type:
             grounded_type[key] = []
         for synonym, identifier_list in value.items():
             #print(key, value, synonym, identifier)
-            for i, identifier in enumerate(identifier_list):
-                if identifier == "":
-                    continue
-                if i == 0:
-                    prefix = "MESH:"
-                elif i == 1:
-                    prefix = "UniprotKB:"
-                elif i == 2:
-                    prefix = "MONDO:"
-                elif i == 3:
-                    prefix == "HPO:"
-                #mesh_id, uniprot, mondo, hpo order for grounding storage
-                identifier = prefix + identifier[0]
+            if len(identifier_list) == 1:
+                identifier = identifier_list[0]
                 resp = requests.get(node_norm_url + identifier)
                 data = resp.json()[identifier]
-                if data is None:
-                    continue
-                data_type = data['type'][0]
-                grounded_type[key].append(data_type)
+                grounded_type[key].append(data['type'][0])
+            else:
+                for i, identifier in enumerate(identifier_list):
+                    if identifier == "":
+                        continue
+                    if i == 0:
+                        prefix = "MESH:"
+                    elif i == 1:
+                        prefix = "UniprotKB:"
+                    elif i == 2:
+                        prefix = "MONDO:"
+                    elif i == 3:
+                        prefix == "HPO:"
+                    #mesh_id, uniprot, mondo, hpo order for grounding storage
+                    identifier = prefix + identifier[0]
+                    resp = requests.get(node_norm_url + identifier)
+                    data = resp.json()[identifier]
+                    if key == "hmg-coa reductase":
+                        print(data)
+                        print(len(data['equivalent_identifiers']), len(data['type']))
+                        """
+                        all_types = [x.replace("biolink:","") for x in data['type']]
+                        all_types = [camel_to_words(x) for x in all_types]
+                        types_string = ""
+                        for i, t in enumerate(all_types):
+                            types_string += str(i+1) + "." + t + "\n"
+                        resp, prompt = prompts.check_type_grounding(types_string, key)
+                        print(types_string)
+                        print(resp)
+                        """
+                        sys.exit(0)
+                    if data is None:
+                        continue
+                    data_type = data['type'][0]
+                    grounded_type[key].append(data_type)
 
     return(grounded_type)
 
@@ -445,18 +472,19 @@ def get_mechanism(term1, term2):
     entity_list = [x.lower().replace(".","") for x in entity_list]
     return(mechanism, entity_list)
 
-def alternate_path(term1, term2, predicate_data, filename):
+def alternate_path(term1, term2, predicate_data, filename, name_lookup_url):
     """
     1. Use both terms to query wikipedia, and derive a mechanism and important entities.
     2. Expand the entities to synonyms.
     3. Ground entities and their synonyms.
     """
+
     if os.path.isfile(filename):
         with open(filename, 'r') as jfile:
             output_data = json.load(jfile)
     else:
         output_data = {}
-    
+
     #get mechanism and entities
     mech = False
     if mech:
@@ -467,12 +495,14 @@ def alternate_path(term1, term2, predicate_data, filename):
     else:
         mechanism = output_data['mechanism']
         entity_list = output_data['entities']
+
     #expand entities to synonyms
-    syn = True
+    syn = False
     if syn:
         print("syn!")
         synonym_dict = {}
         for entity in entity_list:
+            synonym_dict[entity] = []
             resp, prompt = prompts.synonym_prompt(entity)
             synonym_list = resp.split("\n")
             synonym_list = [x.split(". ")[1].rstrip() for x in synonym_list]
@@ -488,10 +518,9 @@ def alternate_path(term1, term2, predicate_data, filename):
         output_data['synonyms'] = synonym_dict
     else:
         synonym_dict = output_data['synonyms']
-    print(synonym_dict)
-    #sys.exit(0)
+
     #find wikipedia pages for synonyms
-    wiki = True
+    wiki = False
     if wiki:
         print("wiki!")
         synonym_pages_dict = {}
@@ -505,6 +534,7 @@ def alternate_path(term1, term2, predicate_data, filename):
             if len(synonym_search['pages']) > 0:
                 tmp_dict[synonym_search['entity']] = synonym_search['pages']
         for entity, synonym_list in synonym_dict.items():
+            synonym_pages_dict[entity] = []
             for key, value in tmp_dict.items():
                 if key in synonym_list:
                     if entity not in synonym_pages_dict:
@@ -513,16 +543,16 @@ def alternate_path(term1, term2, predicate_data, filename):
         output_data['synonym_pages'] = synonym_pages_dict
     else:
         synonym_pages_dict = output_data['synonym_pages']
-    print("synonynm pages dict", synonym_pages_dict)
 
     #ground using wikipedia pages
-    ground = True
+    ground = False
     if ground:
         print("grounding!")
         synonym_groundings = {}
         for key, value in synonym_pages_dict.items():
             if key not in synonym_groundings:
                 synonym_groundings[key] = {}
+            #in the event that we can't ground using wikipedia, we use name lookup
             for entity in value:
                 if entity in synonym_groundings[key]:
                     continue
@@ -535,14 +565,26 @@ def alternate_path(term1, term2, predicate_data, filename):
     else:
         synonym_groundings = output_data['grounded']
 
+    #additional grounding steps using translator
+    add_ground = False
+    if add_ground:
+        for key, value in synonym_groundings.items():
+            if len(value) == 0:
+                param  = {"string": key}
+                resp = requests.post(name_lookup_url, params=param)
+                all_matches = resp.json()
+                label_string = ""
+                for i, match in enumerate(all_matches):
+                    label_string += str(i+1) + "." + match['label'].lower() + "\n"
+                resp, prompt = prompts.additional_grounding(label_string, key)
+                index_resp = int(resp) - 1
+                grounded_label = all_matches[index_resp]['curie']
+                synonym_groundings[key][key] = [grounded_label]
     #type the identifiers that we've grounded on
     type_ground = True
     if type_ground:      
-        grounded_types = grounded_type(synonym_groundings) 
+        grounded_types = grounded_type(synonym_groundings, name_lookup_url) 
         output_data['grounded_type'] = grounded_types
-    else:
-        grounded_types = output_data['grounded_type']
-
     with open(filename, 'w') as jfile:
         json.dump(output_data, jfile)
 
@@ -734,7 +776,6 @@ def main(indication):
     prompt_save_dir = "./wiki_text/prompts_used"
     literature_dir = "./wiki_text"
 
-
     drugmech_predicates = []
     drugmech_entities = []
     predicate_restrictions = {}
@@ -803,8 +844,8 @@ def main(indication):
     basename = basename.replace(" ","_")
     output_filename = os.path.join(literature_dir, basename)
        
-    #first_check = alternate_path(node_names[0], node_names[-1], predicate_data, output_filename)
-    
+    first_check = alternate_path(node_names[0], node_names[-1], predicate_data, output_filename, name_lookup_url)
+    sys.exit(0)
     with open(output_filename, "r") as jfile:
         data = json.load(jfile)
 

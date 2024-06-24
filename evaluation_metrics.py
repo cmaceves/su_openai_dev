@@ -5,7 +5,7 @@ import os
 import sys
 import json
 import random
-
+import numpy as np
 import wiki_pipeline
 import post_process_paths
 random.seed(42)
@@ -40,6 +40,12 @@ def main():
         r = requests.get(indication_url, allow_redirects=True)
         open(indication_json, 'wb').write(r.content)
     
+    #load the meta-analysis of drug mech db
+    metaanalysis_file = "meta_analysis_pruning.json"
+    with open(metaanalysis_file, "r") as mfile:
+        data = json.load(mfile)['connections']
+    acceptable_directed_pairs = [x.split("-") for x in data]
+
     evaluation_indications = parse_indication_paths(indication_json, n)
     
     #leave open for parallel process
@@ -48,7 +54,10 @@ def main():
         for node in indication['nodes']:
             node_names.append(node['name'].lower())
         print(node_names)
-        #wiki_pipeline.main(indication) 
+        #actually does the work to pull out the graph
+        wiki_pipeline.main(indication) 
+        sys.exit(0)
+
         basename = node_names[0] + "_" + node_names[-1] + ".json"
         basename = basename.replace(" ","_")
         output_filename = os.path.join(literature_dir, basename)
@@ -57,13 +66,42 @@ def main():
             data = json.load(ofile)
         triples = data['triplets']
         entities = data['entities']
+        grounded_type = data['grounded_type']
+        print(data['grounded'])
+        print(grounded_type)
+        sys.exit(0)
+
         paths = post_process_paths.create_graph(entities, triples, node_names[0], node_names[-1])
+        slimmed_paths = []
         path_lengths = []
+
+        #print(triples)
         for path in paths:
-            if len(path) > 3 and len(path) < 6:
-                print(path)
-            path_lengths.append(len(path))
-        print(len(paths))
+            path_types = []
+            for node in path:                
+                types = list(np.unique(grounded_type[node]))
+                if len(types) != 1:
+                    continue
+                path_types.append(types[0])
+            if len(path_types) != len(path):
+                continue
+            path_types = [x.replace("biolink:","") for x in path_types]
+            expand_pairs = []
+            for i, path_val in enumerate(path_types):
+                if i+1 < len(path_types):
+                    expand_pairs.append([path_val, path_types[i+1]])
+            keep = True
+            for pair in expand_pairs:
+                if pair not in acceptable_directed_pairs:
+                    if "synthesis of cholesterol" in path and "cholesterol" in path and "hmg-coa reductase" in path:
+                        if "mevalonate" not in path and "atherosclerosis" not in path and "low-density lipoprotein (ldl)" not in path and path[1] == "hmg-coa reductase":
+                            print(pair, path, path_types)
+                    keep = False
+                    break
+            if keep:
+                slimmed_paths.append(path)
+
+        print(len(slimmed_paths))
         sys.exit(0)
         #evaluate based on node groundings
         #evaluate based on predicate similarity
