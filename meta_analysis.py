@@ -5,8 +5,8 @@ import os
 import sys
 import json
 import numpy as np
-#import seaborn as sns
 import matplotlib.pyplot as plt
+
 def main():
     #do some sort of meta-analysis to limit pathways
     indication_json = "indication_paths.json"

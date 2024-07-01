@@ -23,12 +23,19 @@ from wikidata.client import Client
 nltk.download('wordnet')
 lemmatizer = WordNetLemmatizer()
 
+###functions for cleaning text up
 def camel_to_words(camel_str):
     # Replace acronyms and consecutive uppercase letters followed by lowercase letters
     words = re.sub('([A-Z]+)([A-Z][a-z])', r'\1 \2', camel_str)
     # Replace lowercase or digits followed by uppercase letters
     words = re.sub('([a-z\d])([A-Z])', r'\1 \2', words)
     return words
+def remove_parentheses(text):
+    # Define the regex pattern to match parentheses and text within them
+    pattern = r'\(.*?\)'
+    # Use re.sub() to replace matches with an empty string
+    cleaned_text = re.sub(pattern, '', text)
+    return cleaned_text
 
 def wrapper_for_predicates(all_statements, predicate_list):
     kept_predicates = []
@@ -199,53 +206,25 @@ def find_standard_predicate(perm, grounded_types, predicate_restrictions, record
         #print(bcolors.OKBLUE + "failure", bcolors.OKBLUE + sub, bcolors.OKBLUE + obj)
         return(None)
 
-def grounded_type(grounded, name_lookup_url, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
+def grounded_type(grounded, name_lookup_url, mechanism, category_def, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
+    """
+    Ground the nodes to meta-categories available.
+    """
+    types_string = ""
+    messages = [category_def[x] for x in category_def.keys()]
+    count = 1
+    type_lookup = []
+    for i, t in enumerate(category_def.keys()):
+        types_string += str(count) + "." + t + "\n"
+        type_lookup.append(t)
+        count += 1
     grounded_type = {}
     for key, value in grounded.items():
         if key not in grounded_type:
             grounded_type[key] = []
-        for synonym, identifier_list in value.items():
-            #print(key, value, synonym, identifier)
-            if len(identifier_list) == 1:
-                identifier = identifier_list[0]
-                resp = requests.get(node_norm_url + identifier)
-                data = resp.json()[identifier]
-                grounded_type[key].append(data['type'][0])
-            else:
-                for i, identifier in enumerate(identifier_list):
-                    if identifier == "":
-                        continue
-                    if i == 0:
-                        prefix = "MESH:"
-                    elif i == 1:
-                        prefix = "UniprotKB:"
-                    elif i == 2:
-                        prefix = "MONDO:"
-                    elif i == 3:
-                        prefix == "HPO:"
-                    #mesh_id, uniprot, mondo, hpo order for grounding storage
-                    identifier = prefix + identifier[0]
-                    resp = requests.get(node_norm_url + identifier)
-                    data = resp.json()[identifier]
-                    if key == "hmg-coa reductase":
-                        print(data)
-                        print(len(data['equivalent_identifiers']), len(data['type']))
-                        """
-                        all_types = [x.replace("biolink:","") for x in data['type']]
-                        all_types = [camel_to_words(x) for x in all_types]
-                        types_string = ""
-                        for i, t in enumerate(all_types):
-                            types_string += str(i+1) + "." + t + "\n"
-                        resp, prompt = prompts.check_type_grounding(types_string, key)
-                        print(types_string)
-                        print(resp)
-                        """
-                        sys.exit(0)
-                    if data is None:
-                        continue
-                    data_type = data['type'][0]
-                    grounded_type[key].append(data_type)
-
+            resp, prompt = prompts.check_type_grounding(types_string, key, mechanism)
+            data_type = type_lookup[int(resp)-1]
+            grounded_type[key].append(data_type)
     return(grounded_type)
 
 def ground_synonym(term):
@@ -472,7 +451,7 @@ def get_mechanism(term1, term2):
     entity_list = [x.lower().replace(".","") for x in entity_list]
     return(mechanism, entity_list)
 
-def alternate_path(term1, term2, predicate_data, filename, name_lookup_url):
+def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, record_category_def):
     """
     1. Use both terms to query wikipedia, and derive a mechanism and important entities.
     2. Expand the entities to synonyms.
@@ -583,7 +562,7 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url):
     #type the identifiers that we've grounded on
     type_ground = True
     if type_ground:      
-        grounded_types = grounded_type(synonym_groundings, name_lookup_url) 
+        grounded_types = grounded_type(synonym_groundings, name_lookup_url, mechanism, record_category_def) 
         output_data['grounded_type'] = grounded_types
     with open(filename, 'w') as jfile:
         json.dump(output_data, jfile)
@@ -760,7 +739,7 @@ def grade_grounding_step(expected, output_filename):
     print("true positives", tp)
     print("false negatives", fn)
 
-def main(indication):  
+def main(indication, possible_meta_categories):  
     """
     indication : dict
         Contains the indiciation graph selected to run the full pipeline on.
@@ -770,6 +749,7 @@ def main(indication):
     node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="
     predicate_json = "./predicates/predicates.json"
     predicate_definitions = "./predicates/predicate_definitions.json" #created by ChatGPT
+    category_definitions = "./predicates/category_definitions.json" #created by ChatGPT
     entity_json = "./predicates/entities.json"
     name_lookup_url = "https://name-lookup.transltr.io/lookup"
     indication_json = "./indication_paths.json"
@@ -807,7 +787,6 @@ def main(indication):
     need_def_predicates = False
     if need_def_predicates:
         record_predicate_def = {}
-
         #define all the possible predicates
         for i, predicate in enumerate(list(predicate_restrictions.keys())):
             messages = [{"role": "system", "content": "You are a helpful assistant."}]
@@ -823,7 +802,25 @@ def main(indication):
     else:
         with open(predicate_definitions, 'r') as pfile:
             record_predicate_def = json.load(pfile)
-    
+   
+    #here we have ChatGPT define all our node categories, and dump the responses to a json file
+    need_def_categories = False
+    if need_def_categories:
+        record_category_def = {}        
+        for category in possible_meta_categories:
+            messages = [{"role": "system", "content": "You are a helpful assistant."}]
+            template = {"role": "user", "content": "What does '%s' mean for entities in a biochemical or biomedical context?"%category}
+            messages.append(template)
+            resp, prompt = prompts.grammatical_check(messages)
+            other_template = {"role":"assistant", "content":"%s"%resp}
+            messages.append(other_template)
+            record_category_def[category] = messages[1:]
+        with open(category_definitions, 'w') as cfile:
+            json.dump(record_category_def, cfile)       
+    else:
+        with open(category_definitions, "r") as cfile:
+            record_category_def = json.load(cfile)
+
     if not os.path.exists(literature_dir):
         os.makedirs(literature_dir)
         print(f"Directory '{literature_dir}' was created.")
@@ -843,8 +840,7 @@ def main(indication):
     basename = node_names[0] + "_" + node_names[-1] + ".json"
     basename = basename.replace(" ","_")
     output_filename = os.path.join(literature_dir, basename)
-       
-    first_check = alternate_path(node_names[0], node_names[-1], predicate_data, output_filename, name_lookup_url)
+    first_check = alternate_path(node_names[0], node_names[-1], predicate_data, output_filename, name_lookup_url, record_category_def)
     sys.exit(0)
     with open(output_filename, "r") as jfile:
         data = json.load(jfile)

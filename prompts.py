@@ -9,17 +9,40 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
-def check_type_grounding(statements, target, messages=[]):
+def choose_paths(string_paths, mechanism, messages=[]):
     prompt = [{"role": "user", "content": """
     Task:
-    You are a helpful assistant. Which of these statements best describes the category of %s? Return only the number associated with the best statement, with no additional commentary.
+    You are a helpful assistant. Which of these statements best describes the category of %s? Be as specific as possible, and return only the number associated with the most accurate summary of the mechanism, with no additional commentary.
     Example Input Format:
     1. Statement 
     2. Statement
     3. Statement
     Example Output Format:
     3
-    Input: 
+    Input:
+    %s"""%(target, statements)}]
+    messages.extend(prompt)
+
+    completion = client.chat.completions.create(
+    model="gpt-4-turbo",
+    messages=messages
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+
+def check_type_grounding(statements, target, mechanism, messages=[]):
+    prompt = [{"role": "user", "content": """
+    Task:
+    You are a helpful assistant. Which of these statements best describes the category of %s? Be as specific as possible, and return only the number associated with the best statement, with no additional commentary.
+    Example Input Format:
+    1. Statement 
+    2. Statement
+    3. Statement
+    Example Output Format:
+    3
+    Input:
     %s"""%(target, statements)}]
     messages.extend(prompt)
 
