@@ -126,6 +126,7 @@ def main():
                         break
             #construct_string += path[-1]
             string_paths += str(j+1) + "." + construct_string + "\n"
+
         print(string_paths)
         prompts.choose_path(string_paths, mechanism)
         sys.exit(0)
