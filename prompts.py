@@ -9,6 +9,32 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
+def alternate_mechanism(drug, disease):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           Task:
+           You are a helpful assistant, who creates knowledge graphs. Given a drug and a disease it treats, please return the mechanism of action as a series of numbered steps. Each step should consist of two nodes, and a connecting predicate. Nodes can be proteins, organs, recptors, enzymes, biological processes, or other biological entities. You may return up to 10 steps describing the mechanism, and do not return any additional commentary.
+           Example Input Format:
+           Drug: Text
+           Disease: Text
+           Example Output Format:
+           1. Drug -> Predicate -> Entity
+           2. Entity -> Predicate -> Entity
+           3. Entity -> Predicate -> Disease
+           """},
+          {"role": "user", "content": "Drug: %s\nDisease: %s"%(drug, disease)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-4o",
+    messages=prompt
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
 def choose_paths(string_paths, mechanism, messages=[]):
     prompt = [{"role": "user", "content": """
     Task:

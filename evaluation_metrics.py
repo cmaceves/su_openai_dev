@@ -5,6 +5,7 @@ import os
 import sys
 import json
 import random
+import requests
 import numpy as np
 import prompts
 import wiki_pipeline
@@ -117,8 +118,8 @@ def main():
         lp.print_stats()
         sys.exit(0)
         """
-        #wiki_pipeline.main(indication, flatten_meta_categories) 
-        #sys.exit(0)
+        wiki_pipeline.main(indication, flatten_meta_categories) 
+        sys.exit(0)
         basename = node_names[0] + "_" + node_names[-1] + ".json"
         basename = basename.replace(" ","_")
         output_filename = os.path.join(literature_dir, basename)
@@ -133,6 +134,7 @@ def main():
         mechanism = data['mechanism']
         print("Entities", entities)
         print("Mechanism", mechanism)
+        print("Grounded Type", grounded_type)
         paths = post_process_paths.create_graph(entities, triples, node_names[0], node_names[-1])
         slimmed_paths = []
         path_lengths = []

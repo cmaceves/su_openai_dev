@@ -272,18 +272,22 @@ def ground_synonym(term):
     hpo = ""
     if wikibase_id == "":
         return("", "", "", "")
+    properties = ["P486", "P352", "P5270", "P3841"]
     wiki_client = Client() 
     wiki_entity = wiki_client.get(wikibase_id, load=True)
-    for x in wiki_entity.iterlists():
-        label = str(x[0].label)
-        if label == "MeSH descriptor ID":
-            mesh_id = x[1]
-        if label == "UniProt protein ID":
-            uniprot = x[1]
-        if label == "Mondo ID":
-            mondo = x[1]
-        if label == "Human Phenotype Ontology ID":
-            hpo = x[1]
+    claims = wiki_entity.data['claims']
+    for key, value in claims.items():
+        if key in properties:
+            identifier = value[0]['mainsnak']['datavalue']['value']
+            index = properties.index(key)
+            if index == 0:
+                mesh_id = identifier
+            elif index == 1:
+                uniprot = identifier
+            elif index == 2:
+                mondo = identifier
+            elif index == 3:
+                hpo = identifier
     return(mesh_id, uniprot, mondo, hpo)
 
 
@@ -416,12 +420,20 @@ def get_wikidata_id(wikibase_id, lang='en'):
             hpo = wiki_entity.getlist(child)
         #print(term, label, wiki_entity.getlist(child))
 
+def alternate_mechanism(term1, term2):
+    """
+    Get the mechanism without providing ChatGPT with additional data.
+    """
+    print(term1, term2)
+    resp, prompt = prompts.alternate_mechanism(term1, term2)
+    print(resp)
+    sys.exit(0)
 
 def get_mechanism(term1, term2):
     """
     Function to get the mechanism and entities associated.
     """
-    print("fetching mechanism")
+
     wiki_client = Client() 
     #wikpedia query for the first term
     response, redirect, wikibase_id, linked_entities = query_wikipedia(term1)
@@ -452,12 +464,6 @@ def get_mechanism(term1, term2):
     return(mechanism, entity_list)
 
 def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, record_category_def):
-    """
-    1. Use both terms to query wikipedia, and derive a mechanism and important entities.
-    2. Expand the entities to synonyms.
-    3. Ground entities and their synonyms.
-    """
-
     if os.path.isfile(filename):
         with open(filename, 'r') as jfile:
             output_data = json.load(jfile)
@@ -465,9 +471,10 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
         output_data = {}
 
     #get mechanism and entities
-    mech = False
+    mech = True
     if mech:
         print("mech!")
+        alternate_mechanism(term1, term2)
         mechanism, entity_list = get_mechanism(term1, term2)
         output_data['mechanism'] = mechanism
         output_data['entities'] = entity_list
@@ -476,7 +483,7 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
         entity_list = output_data['entities']
 
     #expand entities to synonyms
-    syn = False
+    syn = True
     if syn:
         print("syn!")
         synonym_dict = {}
@@ -499,7 +506,7 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
         synonym_dict = output_data['synonyms']
 
     #find wikipedia pages for synonyms
-    wiki = False
+    wiki = True
     if wiki:
         print("wiki!")
         synonym_pages_dict = {}
@@ -524,7 +531,7 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
         synonym_pages_dict = output_data['synonym_pages']
 
     #ground using wikipedia pages
-    ground = False
+    ground = True
     if ground:
         print("grounding!")
         synonym_groundings = {}
@@ -545,7 +552,7 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
         synonym_groundings = output_data['grounded']
 
     #additional grounding steps using translator
-    add_ground = False
+    add_ground = True
     if add_ground:
         for key, value in synonym_groundings.items():
             if len(value) == 0:
@@ -559,11 +566,13 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
                 index_resp = int(resp) - 1
                 grounded_label = all_matches[index_resp]['curie']
                 synonym_groundings[key][key] = [grounded_label]
+
     #type the identifiers that we've grounded on
     type_ground = True
     if type_ground:      
         grounded_types = grounded_type(synonym_groundings, name_lookup_url, mechanism, record_category_def) 
         output_data['grounded_type'] = grounded_types
+    
     with open(filename, 'w') as jfile:
         json.dump(output_data, jfile)
 
@@ -841,7 +850,6 @@ def main(indication, possible_meta_categories):
     basename = basename.replace(" ","_")
     output_filename = os.path.join(literature_dir, basename)
     first_check = alternate_path(node_names[0], node_names[-1], predicate_data, output_filename, name_lookup_url, record_category_def)
-    sys.exit(0)
     with open(output_filename, "r") as jfile:
         data = json.load(jfile)
 
@@ -850,8 +858,6 @@ def main(indication, possible_meta_categories):
     grounded = data['grounded']
     grounded_types = data['grounded_type']
 
-    print(bcolors.OKCYAN + mechanism)
-    print(bcolors.OKBLUE + str(entities))
     #given a set of entities, lets explore the relationship between each of them
     perm = permutations(entities, 2)
     unique_permutations = set(perm)

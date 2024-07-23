@@ -49,10 +49,6 @@ def main():
     zipped.sort(reverse=True)
     unique_counts, unique = zip(*zipped)
     
-    for u, uc in zip(unique, unique_counts):
-        print(u, uc)
-        #sys.exit(0)
-
     unique = list(unique)
 
     with open("meta_analysis_pruning.json", "w") as jfile:
