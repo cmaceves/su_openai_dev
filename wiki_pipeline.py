@@ -420,15 +420,6 @@ def get_wikidata_id(wikibase_id, lang='en'):
             hpo = wiki_entity.getlist(child)
         #print(term, label, wiki_entity.getlist(child))
 
-def alternate_mechanism(term1, term2):
-    """
-    Get the mechanism without providing ChatGPT with additional data.
-    """
-    print(term1, term2)
-    resp, prompt = prompts.alternate_mechanism(term1, term2)
-    print(resp)
-    sys.exit(0)
-
 def get_mechanism(term1, term2):
     """
     Function to get the mechanism and entities associated.
@@ -474,7 +465,7 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
     mech = True
     if mech:
         print("mech!")
-        alternate_mechanism(term1, term2)
+        #alternate_mechanism(term1, term2)
         mechanism, entity_list = get_mechanism(term1, term2)
         output_data['mechanism'] = mechanism
         output_data['entities'] = entity_list

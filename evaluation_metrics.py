@@ -9,6 +9,7 @@ import requests
 import numpy as np
 import prompts
 import wiki_pipeline
+import no_wiki_pipeline
 import post_process_paths
 from line_profiler import LineProfiler
 random.seed(42)
@@ -111,13 +112,15 @@ def main():
 
         print(node_names)
         #actually does the work to pull out the graph
-        """
+        """ 
         lp = LineProfiler()
         lp_wrapper = lp(wiki_pipeline.main)
         lp_wrapper(indication, flatten_meta_categories)
         lp.print_stats()
         sys.exit(0)
         """
+        no_wiki_pipeline.main(indication)
+        sys.exit(0)
         wiki_pipeline.main(indication, flatten_meta_categories) 
         sys.exit(0)
         basename = node_names[0] + "_" + node_names[-1] + ".json"
