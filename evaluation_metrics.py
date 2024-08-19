@@ -2,11 +2,15 @@
 Evaluate random indications based on node grodunings and predicates.
 """
 import os
+import ast
 import sys
 import json
 import random
 import requests
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 import prompts
 import wiki_pipeline
 import no_wiki_pipeline
@@ -71,14 +75,16 @@ def parse_indication_paths(indication_json, n=10):
     return(selected_items)
 
 def main():
-    #develop a system for storing the evaluation including prompts in a dated way
-
-    #model type
-    
+    name_lookup_url = "https://name-lookup.transltr.io/lookup"
+    predicate_definition_file = "./predicates/predicate_definitions.json" #created by ChatGPT
     #randomly fetch n indications
     n = 10
     indication_json = "indication_paths.json"
-    literature_dir = "./wiki_text"
+    literature_dir = "./no_wiki_text"
+
+    with open(predicate_definition_file, 'r') as pfile:
+        predicate_definitions = json.load(pfile)
+
     if not os.path.exists(indication_json):
         print("Downloading indications file...")
         indication_url = "https://raw.githubusercontent.com/SuLab/DrugMechDB/main/indication_paths.json"
@@ -105,29 +111,81 @@ def main():
     evaluation_indications = parse_indication_paths(indication_json, n)
     
     #leave open for parallel process
+    percent_nodes_directly_grounded = []
     for i, indication in enumerate(evaluation_indications):
+        if i == 0:
+            continue
         node_names = []
+        node_ids = []
         for node in indication['nodes']:
             node_names.append(node['name'].lower())
-
+            node_ids.append(node['id'])
+            
         print(node_names)
-        #actually does the work to pull out the graph
-        """ 
-        lp = LineProfiler()
-        lp_wrapper = lp(wiki_pipeline.main)
-        lp_wrapper(indication, flatten_meta_categories)
-        lp.print_stats()
+        basename = node_names[0] + "_" + node_names[-1] + ".json"
+        basename = basename.replace(" ","_")
+        output_filename = os.path.join(literature_dir, basename)
+
+        no_wiki_pipeline.main(indication, predicate_definition_file)
+        continue
+
+        if not os.path.isfile(output_filename):
+            continue
+        with open(output_filename, 'r') as ofile:
+            data = json.load(ofile)
+
+        #no_wiki_pipeline.ground_predicates(data['triples'], predicate_definitions)
+        grounded_nodes = data['grounded_nodes']
+        all_nodes = []
+        for key, value in grounded_nodes.items():
+            for k, v in value.items():
+                all_nodes.extend(v)
+        node_ids = node_ids[1:-1]
+        print(node_ids)
+        node_ids = [x.split(":")[-1] for i, x in enumerate(node_ids)]
+        all_nodes = [x.split(":")[-1] for x in all_nodes]
+        overlap = [x for x in node_ids if x in all_nodes]
+        percent_nodes_directly_grounded.append(len(overlap)/len(node_ids))
+        continue        
+
+        """    
+        no_wiki_pipeline.main(indication)
+        continue
+
+        if not os.path.isfile(output_filename):
+            continue
+        with open(output_filename, 'r') as ofile:
+            data = json.load(ofile)
+        grounded_nodes = data['grounded_nodes']
+        grounded_types = data['grounded_types']
+        print(grounded_nodes)
+        for key, value in grounded_nodes.items():
+            if len(value) == 0:
+                print(key, value)
+                param  = {"string": key}
+                resp = requests.post(name_lookup_url, params=param)
+                all_matches = resp.json()
+                match_string = ""
+                for i, match in enumerate(all_matches):
+                    match_string += str(i+1) + ". " + str(match) + "\n"
+                resp, prompt = prompts.alternate_pick_grounding(key, match_string)
+                grounded_nodes[key] = all_matches[int(resp)-1]['curie']
+        print(grounded_nodes)
+        print(node_ids)
         sys.exit(0)
         """
-        no_wiki_pipeline.main(indication)
+        no_wiki_pipeline.compare_grounding(grounded_nodes, additional_grounding, grounded_types)
         sys.exit(0)
-        wiki_pipeline.main(indication, flatten_meta_categories) 
-        sys.exit(0)
+        
+        #if os.path.isfile(output_filename):
+        #    continue
+        #wiki_pipeline.main(indication, flatten_meta_categories) 
+        #continue
+
         basename = node_names[0] + "_" + node_names[-1] + ".json"
         basename = basename.replace(" ","_")
         output_filename = os.path.join(literature_dir, basename)
         if not os.path.isfile(output_filename):
-            sys.exit(0)
             continue
         with open(output_filename, 'r') as ofile:
             data = json.load(ofile)
@@ -172,7 +230,12 @@ def main():
 
         #evaluate based on node groundings
         #evaluate based on predicate similarity
-    
+
+
+    print(percent_nodes_directly_grounded)
+    sns.displot(percent_nodes_directly_grounded, color="orange", kind="kde")
+    plt.xlim(0, 1)
+    plt.savefig("./su_figures/displot_percent_direct_ground.png", dpi=300)
 
 if __name__ == "__main__":
     main()

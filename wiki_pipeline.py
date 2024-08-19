@@ -20,7 +20,7 @@ from nltk.stem import WordNetLemmatizer
 from openai import OpenAI
 from line_profiler import LineProfiler
 from wikidata.client import Client
-nltk.download('wordnet')
+#nltk.download('wordnet')
 lemmatizer = WordNetLemmatizer()
 
 ###functions for cleaning text up
@@ -206,7 +206,7 @@ def find_standard_predicate(perm, grounded_types, predicate_restrictions, record
         #print(bcolors.OKBLUE + "failure", bcolors.OKBLUE + sub, bcolors.OKBLUE + obj)
         return(None)
 
-def grounded_type(grounded, name_lookup_url, mechanism, category_def, node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="):
+def grounded_type(grounded, mechanism, category_def):
     """
     Ground the nodes to meta-categories available.
     """
@@ -270,9 +270,10 @@ def ground_synonym(term):
     drugbank = "" #not written in yet
     mondo = ""
     hpo = ""
+    go = ""
     if wikibase_id == "":
-        return("", "", "", "")
-    properties = ["P486", "P352", "P5270", "P3841"]
+        return("", "", "", "", "")
+    properties = ["P486", "P352", "P5270", "P3841", "P686"]
     wiki_client = Client() 
     wiki_entity = wiki_client.get(wikibase_id, load=True)
     claims = wiki_entity.data['claims']
@@ -288,7 +289,9 @@ def ground_synonym(term):
                 mondo = identifier
             elif index == 3:
                 hpo = identifier
-    return(mesh_id, uniprot, mondo, hpo)
+            elif index == 4:
+                go = identifier
+    return(mesh_id, uniprot, mondo, hpo, go)
 
 
 def get_additional_text(expansion_list, term1, term2, mechanism):
@@ -309,6 +312,8 @@ def get_additional_text(expansion_list, term1, term2, mechanism):
     return(all_additional_text)
 
 def matched_wikipedia_pages(entity):
+    if entity == "":
+        return({})
     useful_pages = [] 
     url = "https://en.wikipedia.org/w/api.php"
     text_all = ""
@@ -465,7 +470,6 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
     mech = True
     if mech:
         print("mech!")
-        #alternate_mechanism(term1, term2)
         mechanism, entity_list = get_mechanism(term1, term2)
         output_data['mechanism'] = mechanism
         output_data['entities'] = entity_list
@@ -561,7 +565,7 @@ def alternate_path(term1, term2, predicate_data, filename, name_lookup_url, reco
     #type the identifiers that we've grounded on
     type_ground = True
     if type_ground:      
-        grounded_types = grounded_type(synonym_groundings, name_lookup_url, mechanism, record_category_def) 
+        grounded_types = grounded_type(synonym_groundings, mechanism, record_category_def) 
         output_data['grounded_type'] = grounded_types
     
     with open(filename, 'w') as jfile:
@@ -756,8 +760,6 @@ def main(indication, possible_meta_categories):
     prompt_save_dir = "./wiki_text/prompts_used"
     literature_dir = "./wiki_text"
 
-    drugmech_predicates = []
-    drugmech_entities = []
     predicate_restrictions = {}
     for i,link in enumerate(indication['links']):
         sub = link['source']
@@ -772,11 +774,6 @@ def main(indication, possible_meta_categories):
             predicate_restrictions[predicate] = []
         if [sub_cat, obj_cat] not in predicate_restrictions[predicate]:
             predicate_restrictions[predicate].append([sub_cat, obj_cat])
-        drugmech_entities.append(sub_cat)
-        drugmech_entities.append(obj_cat)
-        drugmech_predicates.append(predicate)
-    drug_mech_entities = list(np.unique(drugmech_entities))
-    drug_mech_predicates = list(np.unique(drugmech_predicates))
 
     with open(entity_json, "r") as jfile:
         entity_data = json.load(jfile) 
