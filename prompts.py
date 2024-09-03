@@ -9,6 +9,35 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
+def choose_embedding_match(possible_matches, term):
+    messages = [{"role": "system", "content": """
+    Task:
+    You will be given a term, and list of descriptions. Your job is to select the description which best describes the term in a biomedical context from the given numbered list. Return only the number of the best equivalent description, with no additional commentary or formatting. 
+    Example Input Format:
+    Term: Text
+    Descriptions:
+    1. Description1
+    2. Description2
+    3. Description3
+    Example Output Format:
+    3
+    """},
+    {"role":"user", "content":
+    """
+    Term: %s
+    Descriptions:
+    %s
+    """%(term, possible_matches)}]
+
+    completion = client.chat.completions.create(
+    model="gpt-4o",
+    messages=messages,
+    temperature=0
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, messages)
+
+
 def define_gpt(value, i=None):
     messages = [{"role": "system", "content": """Task:
 You are a helpful assistant. You will be given a term and a brief description. Your job is to add supplemental information to the definition of the term by expanding on what is given. Do not return any additional commentary, only the expanded definition
@@ -86,7 +115,7 @@ def alternate_mechanism_one_shot(drug, disease, predicate_string):
            """
            Task:
            You are a helpful assistant, who creates knowledge graphs. Given a drug and the disease it treats, please return the mechanism of action as a series of numbered steps. 
-           Determine the important biological and chemical entities used to describe the mechanistic pathway.
+           Determine the important biological and chemical entities used to describe the mechanistic pathway where the drug treats the disease.
            Translate these entities into a stepwise mechanism of action. Not every entity determined to be important must be used in this mechanism, be brief when possible.
            Each step should consist of two node terms, connected by a predicate. The second node term for a step is always the first node term for the subsequent step. The first node term of the first step is always the drug name, and the second node terms of the final step is always the disease name. The names of the node terms are case sensitive.
            The predicates that may be used to describe the relationship between the node terms will be provided. Please pick a single predicate from the given list. Predicates should be chosen such that each step can stand alone and be true.
