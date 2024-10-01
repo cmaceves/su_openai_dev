@@ -6,7 +6,6 @@ import pandas as pd
 import numpy as np
 from transformers import AutoTokenizer
 tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.1")
-
 from lxml import etree
 from nltk.tokenize import word_tokenize
 from gensim.models.doc2vec import Doc2Vec,TaggedDocument
@@ -58,6 +57,7 @@ def try_openai_embeddings(text, model="text-embedding-3-small"):
    return vectors
 
 def main():
+
     with open("new_master_def.json", 'r') as jfile:
         master_dict = json.load(jfile)
 
@@ -236,20 +236,7 @@ def main():
     sys.exit(0)
     
 
-    loaded_model = Doc2Vec.load("test_doc2vec_model.model")
-    new_document = "lipid biosynthesis"
-    resp = prompts.define_gpt(new_document)
-    print("gpt response", resp, "\n")
-    token = word_tokenize(resp.lower())
-    new_vector = loaded_model.infer_vector(token)
-    similar_docs = loaded_model.dv.most_similar([new_vector], topn=10)
-    print("ground truth answer", master_dict['GO:0008610'], "\n")
-    for tag, similarity in similar_docs:
-        print(f"Document tag: {tag}, Similarity: {similarity}") 
-        print(record_data[int(tag)], labels[int(tag)], "\n")
-    
-    sys.exit(0)
-    
+   
     #go_filename = "./databases/go_definitions.txt"
     #parse_go_terms(go_filename)
     mesh_filename = "mesh_db_2024.gz"

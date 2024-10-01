@@ -6,10 +6,14 @@ import requests
 import wikidata.client
 
 from joblib import Parallel, delayed
+from sklearn.metrics.pairwise import cosine_similarity
 import prompts
+import util
 import wiki_pipeline
-name_lookup_url = "https://name-lookup.transltr.io/lookup"
+import numpy as np
 
+name_lookup_url = "https://name-lookup.transltr.io/lookup"
+node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="
 go_types = ["Biological Process", "Cellular Component", "Molecular Activity"]
 react_types = ["Pathway"]
 mesh_types = ["Chemical Substance", "Disease", "Drug"]
@@ -18,6 +22,95 @@ uniprot_types = ["Protein"]
 hp_types = ['Phenotypic Feature']
 
 client = wikidata.client.Client()
+
+def find_databases(node_type):
+    databases = []
+    if node_type in go_types:
+        databases.append("GO")
+    if node_type in mesh_types:
+        databases.append("MESH")
+    if node_type in uniprot_types:
+        databases.append("UniProt")
+    return(databases)
+
+def ground_embedding_space(nodes, mechanism_paragraph, grounded_node_type):
+    with open("new_master_def.json", 'r') as jfile:
+        master_dict = json.load(jfile)
+    embedding_vectors = np.load('new_openai_embedding.npy')
+    
+    found_identifiers = {}
+    for node in nodes:
+        print("node", node)
+        node_type = grounded_node_type[node]
+        databases = find_databases(node_type)
+
+        resp = prompts.define_gpt(node.lower())
+        vec = util.try_openai_embeddings(resp)
+        vec = np.array(vec)
+        vec = vec.reshape(1, -1)
+        cosine_scores = cosine_similarity(vec, embedding_vectors)
+        cosine_scores = cosine_scores.flatten()
+
+        indexes = list(range(len(cosine_scores)))
+        zipped = list(zip(cosine_scores, indexes))
+        zipped.sort(reverse=True)
+        cosine_scores, indexes = zip(*zipped)
+        cosine_scores = list(cosine_scores)[:20]
+        indexes = list(indexes)[:20]
+        
+        labels = []
+        label_string = ""
+        counter = 1
+        print("databases", databases)
+        for j, (key, value) in enumerate(master_dict.items()):
+            if j in indexes:
+                database_tmp = key.split(":")
+            
+                if len(database_tmp) == 1:
+                    if database_tmp[0].startswith("D"):
+                        database_tmp =  "MESH"
+                    else:
+                        database_tmp = "UniProt"
+                else:
+                    database_tmp = database_tmp[0]
+                if database_tmp not in databases:
+                    continue
+                
+                label_string += str(counter) + "." + value + "\n"
+                if database_tmp == "MESH":
+                    key = "MESH:" + key
+                labels.append(key)
+                counter += 1
+                if counter > 10:
+                    break
+                
+        resp, prompt = prompts.choose_embedding_identifier(node, label_string)
+        index = int(resp)-1
+        found_identifiers[node] = labels[index] 
+    return(found_identifiers)
+
+def ground_name_lookup(nodes, mechanism_paragraph, grounded_node_types):
+    grounded_nodes = {}
+    for node in nodes:
+        param  = {"string": node}
+        resp = requests.post(name_lookup_url, params=param)
+        all_matches = resp.json()
+        labels = []
+        label_string = ""
+
+        for i,match in enumerate(all_matches):
+            label = match['label']
+            labels.append(label)
+            label_string += str(i+1) + "." + label +"\n"
+            print(match)
+        sys.exit(0)
+        print(node)
+        print(label_string)
+        response, prompt = prompts.choose_identifier(node, label_string, mechanism_paragraph)
+        index = int(response) - 1
+        grounded_nodes[node] = all_matches[index]
+        print(response)
+    sys.exit(0)
 
 def ground_predicates(triples, predicates):
     predicate_string = ""
@@ -218,22 +311,6 @@ def alternate_mechanism_one_shot(term1, term2, predicate_data):
         all_triples.append(triple)
     return(all_triples)
 
-
-def alternate_mechanism(term1, term2):
-    """
-    Get the mechanism without providing ChatGPT with additional data.
-    """
-    all_triples = []
-    resp, prompt = prompts.alternate_mechanism(term1, term2)
-    steps = resp.split("\n")
-    steps = [x.split(". ")[-1] for x in steps]
-    print(resp)
-    #expand the steps to triples
-    for step in steps:
-        triple = step.split(" -> ")
-        all_triples.append(triple)
-    return(all_triples)
-
 def main(indication, predicate_json):
     entity_json = "./predicates/entities.json"
     literature_dir = "./no_wiki_text"
@@ -253,8 +330,10 @@ def main(indication, predicate_json):
         print(f"Directory '{literature_dir}' already exists.")
 
     category_string = ""
+    categories = []
     for i, t in enumerate(record_category_def.keys()):
         category_string += str(i) + "." + t + "\n"
+        categories.append(t)
 
     #ground truth values
     node_identifiers = []
@@ -268,9 +347,8 @@ def main(indication, predicate_json):
     #if os.path.isfile(output_filename):
     #    return
 
-    #all_triples = alternate_mechanism(node_names[0], node_names[-1])
     all_triples = alternate_mechanism_one_shot(node_names[0], node_names[-1], predicate_data)
-    
+
     #pull out all nodes for the mechanism
     unique_nodes = []
     for triple in all_triples:
@@ -279,18 +357,35 @@ def main(indication, predicate_json):
         if triple[-1] not in unique_nodes:
             unique_nodes.append(triple[-1])
 
+    string_version = ""
+    for i, triple in enumerate(all_triples):
+        if i != 0:
+            string_version += ". "
+        tmp = " ".join(triple)
+        string_version += tmp
+    mechanism_paragraph, prompt  = prompts.mech_paragraph_form(string_version)
+
     category_messages = []
-    values = []
     for k, v in record_category_def.items():
         category_messages.extend(v)
     
     #type ground the nodes 
     grounded_types = ground_node_types(unique_nodes, record_category_def, category_string)
+    print(grounded_types)
+
+    #ground_name_lookup(unique_nodes, mechanism_paragraph, grounded_types)
+    found_identifiers = ground_embedding_space(unique_nodes, mechanism_paragraph, grounded_types)
+    output_data = {"triples":all_triples, "grounded_nodes":found_identifiers, "grounded_types": grounded_types}
+    with open(output_filename, 'w') as ofile:
+        json.dump(output_data, ofile)
+    return
 
     node_dictionary = {}
     for un in unique_nodes:
         node_dictionary[un] = [un]
     
+    sys.exit(0)
+
     first_pass_grounding = wikidata_grounding(unique_nodes)    
     print(first_pass_grounding)
     sys.exit(0)

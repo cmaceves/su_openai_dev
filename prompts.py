@@ -9,6 +9,49 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
+def choose_embedding_identifier(entity, labels):
+    messages = [{"role": "system", "content": """
+    Task:
+    You will be given an entity, a list of potential labels including their descriptions. Please return the number of the closest matched label, with no additional formatting or commentary.
+    Example Input Format:
+    Term: Text
+    Labels:
+    1. Label1
+    2. Label2
+    3. Label3
+    Example Output Format:
+    3
+    """},
+    {"role":"user", "content":
+    """
+    Term: %s
+    Labels: %s
+    """%(entity, labels)}]
+
+    completion = client.chat.completions.create(
+    model="gpt-4o",
+    messages=messages,
+    temperature=0
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, messages)
+
+
+def mech_paragraph_form(sentences):
+    messages = [{"role": "system", "content": """Task: You are a helpful assistant. You will be given a series of short statements describing a mechanism of action. Please expand this to a full paragraph and return with no additional commentary."""},
+    {"role":"user", "content":
+    """
+    %s
+    """%(sentences)}
+    ]
+    completion = client.chat.completions.create(
+    model="gpt-4o",
+    messages=messages,
+    temperature=0
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, messages)
+
 def choose_embedding_match(possible_matches, term):
     messages = [{"role": "system", "content": """
     Task:
@@ -40,7 +83,7 @@ def choose_embedding_match(possible_matches, term):
 
 def define_gpt(value, i=None):
     messages = [{"role": "system", "content": """Task:
-You are a helpful assistant. You will be given a term and a brief description. Your job is to add supplemental information to the definition of the term by expanding on what is given. Do not return any additional commentary, only the expanded definition
+You are a helpful assistant. You will be given a term and a brief description. Your job is to add supplemental information to the definition of the term by expanding on what is given. Do not return any additional commentary, only the expanded definition.
 Example Input Format:
 Term: Text
 Definition: Text
@@ -57,7 +100,6 @@ Text"""},
     temperature=0
     )
     response = str(completion.choices[0].message.content)
-    print(i)
     return(response)
 
 def lemmatize(term):

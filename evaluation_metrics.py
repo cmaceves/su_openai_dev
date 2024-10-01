@@ -8,6 +8,7 @@ import json
 import random
 import requests
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -78,7 +79,7 @@ def main():
     name_lookup_url = "https://name-lookup.transltr.io/lookup"
     predicate_definition_file = "./predicates/predicate_definitions.json" #created by ChatGPT
     #randomly fetch n indications
-    n = 10
+    n = 50
     indication_json = "indication_paths.json"
     literature_dir = "./no_wiki_text"
 
@@ -112,20 +113,19 @@ def main():
     
     #leave open for parallel process
     percent_nodes_directly_grounded = []
+
+    all_nodes = []
+    node_identifiers = []
+
     for i, indication in enumerate(evaluation_indications):
-        if i == 0:
-            continue
         node_names = []
         node_ids = []
         for node in indication['nodes']:
             node_names.append(node['name'].lower())
-            node_ids.append(node['id'])
-            
-        print(node_names)
+    
         basename = node_names[0] + "_" + node_names[-1] + ".json"
         basename = basename.replace(" ","_")
         output_filename = os.path.join(literature_dir, basename)
-
         no_wiki_pipeline.main(indication, predicate_definition_file)
         continue
 
@@ -230,12 +230,6 @@ def main():
 
         #evaluate based on node groundings
         #evaluate based on predicate similarity
-
-
-    print(percent_nodes_directly_grounded)
-    sns.displot(percent_nodes_directly_grounded, color="orange", kind="kde")
-    plt.xlim(0, 1)
-    plt.savefig("./su_figures/displot_percent_direct_ground.png", dpi=300)
-
+    
 if __name__ == "__main__":
     main()
