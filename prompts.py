@@ -12,7 +12,7 @@ client = OpenAI()
 def choose_embedding_identifier(entity, labels):
     messages = [{"role": "system", "content": """
     Task:
-    You will be given an entity, a list of potential labels including their descriptions. Please return the number of the closest matched label, with no additional formatting or commentary.
+    You will be given an entity, a list of potential labels including their descriptions. Please return the number of the closest matched label, with no additional formatting or commentary. Do not return the label itself.
     Example Input Format:
     Term: Text
     Labels:
@@ -99,6 +99,7 @@ Text"""},
     messages=messages,
     temperature=0
     )
+    print(i)
     response = str(completion.choices[0].message.content)
     return(response)
 
@@ -157,12 +158,12 @@ def alternate_mechanism_one_shot(drug, disease, predicate_string):
            """
            Task:
            You are a helpful assistant, who creates knowledge graphs. Given a drug and the disease it treats, please return the mechanism of action as a series of numbered steps. 
-           Determine the important biological and chemical entities used to describe the mechanistic pathway where the drug treats the disease.
-           Translate these entities into a stepwise mechanism of action. Not every entity determined to be important must be used in this mechanism, be brief when possible.
+           Determine the biological and chemical entities that consistute the mechanistic pathway where the drug treats the disease, including all proteins, organs, receptors, enzymes, chemical substances, small molecules, biological processes, biological pathways, cell types, organism taxons, gene families, molecular activities, macromolecular complexes, anatomical structures, and cellular components. Be specific without going in a circle, and don't include steps so general as to be obsolete.
+           Translate these entities into a stepwise mechanism of action.
            Each step should consist of two node terms, connected by a predicate. The second node term for a step is always the first node term for the subsequent step. The first node term of the first step is always the drug name, and the second node terms of the final step is always the disease name. The names of the node terms are case sensitive.
            The predicates that may be used to describe the relationship between the node terms will be provided. Please pick a single predicate from the given list. Predicates should be chosen such that each step can stand alone and be true.
            Node terms are biological or chemical entities, and can be proteins, organs, receptors, enzymes, chemical substances, small molecules, biological processes, biological pathways, cell types, organism taxons, gene families, molecular activities, macromolecular complexes, anatomical structures, cellular components, phenotypic features, diseases or drugs. Node terms cannot contain descriptive terms such as "lower", "higher", "decrease", "increase", "reduced", "level" or any other similar quantity or measurement modifiers. Node terms contain no indication of biological function. Node terms cannot contain predicates or verbs.
-           You may return up to 10 steps describing the mechanism, and do not return any additional commentary.
+           You may return up to 15 steps describing the mechanism, and do not return any additional commentary.
 
            Example Input Format:
            Drug: Text
@@ -369,31 +370,6 @@ def find_urls(entity):
     response = str(completion.choices[0].message.content)
     return(response, prompt)
 
-def alternate_entity_expansion(entity, type_restriction, messages):
-    prompt = [
-          {"role": "user", "content": 
-           """
-           Task:
-           You are a helpful assistant. You will be given a biological entity term and it's category, and your task is to return a list of synonyms. This list of synonyms should be an expanded list of terms that may be used to ground the same entity, assign an identifier, in a downstream task. Any synonym returned must fall within the same categorization as the original entity. Synonyms should be returned as a numbered list seperated with newlines. Do not return any additional commentary.
-           Example Input Format:
-           Entity: Entity
-           Category: Entity Category
-           Example Output Format:
-           1. Synonym1
-           2. Synonym2
-           3. Synonym3
-           """},
-          {"role": "user", "content": "Entity: %s\nCategory: %s"%(entity, type_restriction)}
-      ]
-    messages.extend(prompt)
-    completion = client.chat.completions.create(
-    model="gpt-4o",
-    messages=prompt,
-    temperature = 0
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
 def alternate_mechanism(drug, disease):
     prompt =[
           {"role": "system", "content": 
@@ -494,22 +470,6 @@ def additional_grounding(statements, target, messages=[]):
     return(response, prompt)
 
 
-def describe_accuracy(statement):
-    prompt =[
-          {"role": "system", "content": 
-           """
-           You are a helpful assistant.
-           """},
-          {"role": "user", "content": "Is the statement '%s' accurate? Please respond with a 'yes' or 'no', and if the statement is only partically accurate respond with 'no'. Do not return any additional commentary or formatting."%(statement)}
-      ]
-
-    completion = client.chat.completions.create(
-    model="gpt-4-turbo",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
 def describe_relationship(sub, obj):
     prompt =[
           {"role": "system", "content": 
@@ -551,90 +511,6 @@ def testy_test(statements, sub, obj, messages):
 def grammatical_check(prompt):
     completion = client.chat.completions.create(
     model="gpt-4",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
-def synonym_context(word1, word2, paragraph):
-    prompt =[
-          {"role": "system", "content": 
-           """
-           Task:
-           You are a helpful assistant. You will be given a paragraph, a word of interest, and a synonym for the word of interest. Your job is to determine whether or not the synonym means the same thing as the word of interest in the context of the paragraph. If the word and the synonym mean the same thing in the context of the pargraph, return "yes" otherwise return "no" in lowercase with no punctuation. Do not return any additional commentary or formatting.
-           Example Input Format:
-           Paragraph:Insert paragraph here.
-           Word of interest: Insert word here.
-           Synonym: Insert synonym here.
-
-           Example Output Format:
-           yes
-           """},
-          {"role": "user", "content": "Paragraph:%s\nWord of interest:%s\nSynonym:%s"%(paragraph, word1, word2)}
-      ]
-
-
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
-
-def synonym_prompt(entity):
-    prompt =[
-          {"role": "system", "content": 
-           """
-           Task:
-           You are a helpful assistant. You will be provided a biological entity. Return each synonym on a newline as a numbered list with no additional commentary or formatting.
-           Example Output Format:
-           1. Synonym1
-           2. Synonym2
-           3. Synonym3
-           """},
-          {"role": "user", "content": "What are all synonyms for '%s'?"%(entity)}
-      ]
-
-
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
-def test_prompt(page, mechanism):
-    prompt =[
-          {"role": "system", "content": 
-           """
-           Task:
-           You are trying to improve a description of a mechanism of action of a drug. To do so you must determine which Wikipedia database pages will provide relevant additional information. Given the title of a Wikipedia database page, and the known description mechanism of action, determine whether or not the Wikipedia database page can improve our knowledge. Please return your answer as either a "yes", meaning the page will provide relevant information or "no" meaning that the page will not provide relevant information. Do not return any additional commentary or formatting.
-           """},
-          {"role": "user", "content": "Wikipedia Database Page Title:%s\nMechanism:%s"%(page,mechanism)}
-      ]
-
-
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=prompt
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, prompt)
-
-
-def summarize_add_info(text, mechanism):
-    prompt =[
-          {"role": "system", "content": 
-           """
-          Given a paragraph of text, and a mechansims by which a drug treats a disease, please summarize the paragraph of text while retaining all information possibly relevant to the mechanism.
-          """},
-          {"role": "user", "content": "Paragraph:%s\nMechanism:%s"%(text,mechanism)}
-      ]
-
-
-    completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
     messages=prompt
     )
     response = str(completion.choices[0].message.content)
@@ -691,16 +567,4 @@ def extract_mech_path(paragraph, drug, disease):
     response = str(completion.choices[0].message.content)
     return(response, prompt)
 
-def summarize_text(text):
-    completion = client.chat.completions.create(
-      model="gpt-4",
-      messages=[
-          {"role": "system", "content": 
-          """
-          You are a helpful assistant, used to summarize scientific text. You will be given a chunk of text and asked to summarize it while retaining all named scientific entities. Please return the summary with no additional commentary or formatting.
-          """},
-          {"role": "user", "content": 'Summarize the following text: %s' %(text)}
-      ]
-    )
-    resp = str(completion.choices[0].message.content)
-    return(resp)
+

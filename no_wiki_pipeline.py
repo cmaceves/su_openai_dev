@@ -34,7 +34,7 @@ def find_databases(node_type):
     return(databases)
 
 def ground_embedding_space(nodes, mechanism_paragraph, grounded_node_type):
-    with open("new_master_def.json", 'r') as jfile:
+    with open("master_dict_2.json", 'r') as jfile:
         master_dict = json.load(jfile)
     embedding_vectors = np.load('new_openai_embedding.npy')
     
@@ -62,6 +62,10 @@ def ground_embedding_space(nodes, mechanism_paragraph, grounded_node_type):
         label_string = ""
         counter = 1
         print("databases", databases)
+        if len(databases) == 0:
+            found_identifiers[node] = ""
+            continue
+
         for j, (key, value) in enumerate(master_dict.items()):
             if j in indexes:
                 database_tmp = key.split(":")
@@ -85,8 +89,16 @@ def ground_embedding_space(nodes, mechanism_paragraph, grounded_node_type):
                     break
                 
         resp, prompt = prompts.choose_embedding_identifier(node, label_string)
-        index = int(resp)-1
-        found_identifiers[node] = labels[index] 
+        try:
+            index = int(resp)-1
+        except:
+            print(resp)
+            found_identifiers[node] = ""
+            continue
+        try:
+            found_identifiers[node] = labels[index] 
+        except:
+            found_identifiers[node] = ""
     return(found_identifiers)
 
 def ground_name_lookup(nodes, mechanism_paragraph, grounded_node_types):
@@ -303,6 +315,7 @@ def alternate_mechanism_one_shot(term1, term2, predicate_data):
         
     all_triples = []
     resp, prompt = prompts.alternate_mechanism_one_shot(term1, term2, predicate_string)
+    print(resp)
     steps = resp.split("\n")
     steps = [x.split(". ")[-1] for x in steps]
     #expand the steps to triples
@@ -348,7 +361,6 @@ def main(indication, predicate_json):
     #    return
 
     all_triples = alternate_mechanism_one_shot(node_names[0], node_names[-1], predicate_data)
-
     #pull out all nodes for the mechanism
     unique_nodes = []
     for triple in all_triples:
@@ -376,9 +388,11 @@ def main(indication, predicate_json):
     #ground_name_lookup(unique_nodes, mechanism_paragraph, grounded_types)
     found_identifiers = ground_embedding_space(unique_nodes, mechanism_paragraph, grounded_types)
     output_data = {"triples":all_triples, "grounded_nodes":found_identifiers, "grounded_types": grounded_types}
+    print(found_identifiers)
     with open(output_filename, 'w') as ofile:
         json.dump(output_data, ofile)
     return
+    #HERE
 
     node_dictionary = {}
     for un in unique_nodes:

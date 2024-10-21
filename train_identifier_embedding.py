@@ -206,9 +206,7 @@ def main():
     for i, vec in enumerate(embedding_vectors):
         if i % 1000 == 0 and i > 0:
             print(i)
-        new_vectors.append(ast.literal_eval(vec))
-
-    
+        new_vectors.append(ast.literal_eval(vec))    
     embedding_vectors = np.array(new_vectors)
     np.save('openai_embedding.npy', embedding_vectors)
     sys.exit(0)
