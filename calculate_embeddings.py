@@ -142,6 +142,10 @@ def retrieve_batch(basename):
     filename = os.path.join(output_dir, basename+"_params.txt")
     output_filename = os.path.join(output_dir, basename+"_results.json")
 
+    #we have already retrieved this file
+    if os.path.isfile(output_filename):
+        return
+    
     with open(filename, "r") as ffile:
         data = json.load(ffile)
     output_file_id = data['batch_output_file_id']
@@ -154,14 +158,14 @@ def retrieve_batch(basename):
             jfile.write(output_data)
 
 def main():
-    upload = False
+    upload = True
     check = False
 
     embeddings = False
-    embeddings_check = True
+    embeddings_check = False
 
     #this will yield however many batches are present in the database
-    database_name = "mesh"
+    database_name = "interpro"
     
     if upload:
         batch_request_formatting(database_name)
@@ -172,9 +176,9 @@ def main():
         for batch in all_batches:
             basename = os.path.basename(batch).replace(".jsonl", "")
             upload_batch(batch, basename)
-
+    
+    #check the batch status and if it's complete retrieve it
     if check:
-        #check the batch status and if it's complete retrieve it
         #get all batches for this database
         format_dir = "/home/caceves/su_openai_dev/batch_request_formatted"
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
@@ -185,13 +189,21 @@ def main():
 
     if embeddings:
         #here we grab the actual embedding vector
+        format_dir = "/home/caceves/su_openai_dev/batch_request_formatted"
+        all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
+
         for batch in all_batches:
             basename = os.path.basename(batch).replace(".jsonl", "")
+            prefix = basename+"_vectors"
+
+            #here we check if this batch has been successfully uploaded before
+            output_file = os.path.join(output_dir, prefix + "_results.json")
+            if os.path.isfile(output_file):
+                continue
+
             process_embedding(basename)
             filename = os.path.join("/home/caceves/su_openai_dev/embedding_request_formatted", basename+"_embedding.jsonl")
-            #prefix = basename+"_vectors"
-            #print(filename, prefix)    
-            #upload_embedding_batch(filename, prefix)
+            upload_embedding_batch(filename, prefix)
 
     if embeddings_check:
         format_dir = "/home/caceves/su_openai_dev/embedding_request_formatted"

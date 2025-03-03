@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import requests
 import random
 random.seed(42)
 import numpy as np
@@ -9,9 +10,91 @@ from dotenv import load_dotenv
 load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
-
+from bs4 import BeautifulSoup
+from xml.etree import ElementTree as ET
 from joblib import Parallel, delayed
 import prompts
+import networkx as nx
+
+def find_paths(drug, disease, triples):
+    edges = [(x[0].lower(), x[2].lower(), {"label":x[1]}) for x in triples if len(x) == 3]
+    G = nx.DiGraph()
+    G.add_edges_from(edges)
+    print(len(G.edges))
+    paths = list(nx.all_simple_paths(G, source=drug, target=disease))
+    all_strings = ""
+    for i, path in enumerate(paths):
+        tmp_string = ""
+        if i < 100:
+            print(path)
+            edge_labels = [G[path[i]][path[i + 1]]["label"] for i in range(len(path) - 1)]
+            for j in range(len(path)):
+                tmp_string += path[j]
+                if j < len(path) - 1:
+                    tmp_string += " -> "
+                if j < len(edge_labels):
+                    tmp_string += edge_labels[j] + " -> "
+            all_strings += str(i+1) + ". " + tmp_string + "\n"
+            #print(tmp_string)
+    print(all_strings)
+    sys.exit(0)
+    print(len(paths))
+
+def pubmed_search_json(term, max_results=10):
+    # Define the base URLs for E-utilities API
+    base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    search_url = base_url + "esearch.fcgi"
+    fetch_url = base_url + "efetch.fcgi"
+
+    # Step 1: Search for PubMed articles based on the search term
+    max_results = 3000
+    search_params = {
+        "db": "pubmed",
+        "term": term + " AND humans[MeSH Terms]",
+        "retmax": max_results,  # Limit the number of results
+        "retmode": "json"       # Return results in JSON format
+    }
+    search_response = requests.get(search_url, params=search_params)
+    search_results = search_response.json()
+    if len(search_results) == 0:
+        return {}
+
+    # Get the list of PubMed IDs (PMIDs)
+    pmid_list = search_results["esearchresult"]["idlist"]
+    if not pmid_list:
+        return {}
+    
+    counter = 0
+    max_counter = 100
+    increment = 100
+    all_titles = []
+    while max_counter <= 500:
+        pmid_list_tmp = pmid_list[counter:max_counter]
+        counter += increment
+        max_counter += increment
+        # Step 2: Fetch abstracts for each PMID
+        fetch_params = {
+            "db": "pubmed",
+            "id": ",".join(pmid_list_tmp),  # Join PMIDs as a comma-separated string
+            "retmode": "xml",          # Fetch results in JSON format
+            "rettype": "abstract"
+        }
+        fetch_response = requests.get(fetch_url, params=fetch_params)
+        soup = BeautifulSoup(fetch_response.content, "xml")
+        abstracts = {}
+        titles = []
+        for article in soup.find_all("PubmedArticle"):
+            pmid = article.find("PMID").text
+            abstract_text = ""
+            titles.append(article.find("ArticleTitle").text)
+            # Find all AbstractText sections and handle HTML tags within
+            #for abstract_section in article.find_all("AbstractText"):
+            #    abstract_text += abstract_section.get_text(" ", strip=True) + " "  # Join text with spaces
+
+            # Store the cleaned abstract text by PMID
+            #abstracts[pmid] = abstract_text.strip()
+        all_titles.append(titles)
+    return(abstracts, all_titles)
 
 def parse_indication_paths(indication_json, n=None):
     """
@@ -32,14 +115,20 @@ def parse_indication_paths(indication_json, n=None):
     return(selected_items)
 
 def try_openai_embeddings(text, model="text-embedding-3-small"):
-   embed = client.embeddings.create(input=text, model=model)
-   vectors = []
-   for x in embed.data:
-       vec = x.embedding
-       vectors.append(vec)
-   return vectors
+    """
+    Queries OpenAI for vector embeddings.
+    """
+    embed = client.embeddings.create(input=text, model=model)
+    vectors = []
+    for x in embed.data:
+        vec = x.embedding
+        vectors.append(vec)
+    return vectors
 
 def ingest_database():
+    """
+    Code that isn't very generalizable for ingesting databases.
+    """
     chebi_database = "/home/caceves/su_openai_dev/databases/ChEBI_complete_3star.sdf"
     hpo_database = "/home/caceves/su_openai_dev/databases/hp.json"
 
@@ -97,5 +186,16 @@ def ingest_database():
         json.dump(all_dict, jfile)
 
 if __name__ == "__main__":
-    ingest_database()
+    #ingest_database()
+    
+    search_term = "Clocortolone pivalate"
+    search_term = "phospholipase a2 prostaglandins"
+    search_term = search_term.lower()
+    print(search_term)
+    abstracts = pubmed_search_json(search_term, max_results=10)
+    for key, value in abstracts.items():
+        entities, resp = prompts.extract_entities(value)
+        print(key)
+        print(entities)
+        print("\n")
 

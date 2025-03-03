@@ -63,7 +63,7 @@ def plot_embedding_spaces(filenames):
 
     X_umap = umap.UMAP(n_components=2, random_state=42).fit_transform(X)
 
-    sns.scatterplot(x=X_umap[:, 0], y=X_umap[:, 1], hue=y)
+    sns.scatterplot(x=X_umap[:, 0], y=X_umap[:, 1], hue=labels)
     plt.xlabel("UMAP Component 1")
     plt.ylabel("UMAP Component 2")
     plt.title("UMAP Visualization")
@@ -82,7 +82,7 @@ def main():
     
     all_finished_embeddings = [os.path.join(embeddings_output_dir, x) for x in os.listdir(embeddings_output_dir) if x.endswith(".npy")]
 
-    plot_embedding_spaces(all_finished_embeddings)
+    #plot_embedding_spaces(all_finished_embeddings)
 
 if __name__ == "__main__":
     main()

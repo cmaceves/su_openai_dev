@@ -57,7 +57,7 @@ def try_openai_embeddings(text, model="text-embedding-3-small"):
    return vectors
 
 def main():
-
+    """
     with open("new_master_def.json", 'r') as jfile:
         master_dict = json.load(jfile)
 
@@ -93,7 +93,6 @@ def main():
     print(possible_matches_order[resp-1])
     sys.exit(0)
 
-    """
 
     uniprot_json = "/home/caceves/su_openai_dev/databases/uniprot_human.json"
     uniprot_strings = []
@@ -116,11 +115,11 @@ def main():
     with open('uniprot_def_1.json', 'w') as jfile:
         json.dump(uniprot_def_dict, jfile)
     sys.exit(0)
-    """
+    
     master_dict = {}
     record_data = []
     labels = []
-    """
+
     uniprot_database = "/home/caceves/su_openai_dev/databases/uniprot_sprot.dat"
     counter = 0
     keep = False
@@ -167,8 +166,6 @@ def main():
     with open("/home/caceves/su_openai_dev/databases/uniprot_human.json", "w") as jfile:
         json.dump({"description":keep_dict, "order":uniprot_order}, jfile)
     sys.exit(0)
-    """
-    """
     for go_filename in go_filenames:
         with open(go_filename, 'r') as gfile:
             data = json.load(gfile)
@@ -211,6 +208,8 @@ def main():
     np.save('openai_embedding.npy', embedding_vectors)
     sys.exit(0)
     """
+
+    """
     embedding_vectors = np.load('openai_embedding.npy')
     print(embedding_vectors.shape)
     new_document = "lipid biosynthesis"
@@ -232,11 +231,9 @@ def main():
         if j in indexes:
             print(key, value)
     sys.exit(0)
-    
-
-   
     #go_filename = "./databases/go_definitions.txt"
     #parse_go_terms(go_filename)
+    """
     mesh_filename = "mesh_db_2024.gz"
     tree = etree.parse(mesh_filename)
     root = tree.getroot()
@@ -245,11 +242,27 @@ def main():
     all_names = []
     all_strings = []
     all_ui = []
-    """
+
+    def find_all_tags(element):
+        tags = set()
+        for elem in element.iter():
+            tags.add(elem.tag)
+        return tags
+
+
+
     for i, record in enumerate(root.findall('DescriptorRecord')):
         if i % 5000 == 0:
             print(i)
+        all_tags = find_all_tags(record)
+        print(all_tags)
+        tmp = record.find("DescriptorUI").text.strip()
+        print(tmp)
+        sys.exit(0)
         ui = record.find('DescriptorUI').text.strip()
+        if ui == "MESH:C007088" or ui == "C007088":
+            print(i, ui)
+            sys.exit(0)
         name = record.find('DescriptorName').find("String").text.strip()
         concept_list = record.find('ConceptList')
         concept = concept_list.find('Concept')
@@ -263,9 +276,8 @@ def main():
         all_strings.append(str(pass_string))
         all_names.append(name)
         all_ui.append(ui)
-        #if ui == "D008148":
-        #    print(i)
-        #    sys.exit(0)
+
+    """
     response = Parallel(n_jobs=20)(delayed(prompts.define_gpt)(value, i) for i, value in enumerate(all_strings[25000:30000]))
     for resp, name, ui in zip(response, all_names, all_ui):
         gpt_def[ui] = resp
@@ -273,33 +285,6 @@ def main():
     with open('gpt_def_6.json', 'w') as jfile:
         json.dump(gpt_def, jfile)
     sys.exit(0)
-    """ 
-    print("tokenize documents")
-    #preproces the documents, and create TaggedDocuments
-    tagged_data = [TaggedDocument(words=word_tokenize(doc.lower()),
-                                  tags=[str(i)]) for i,
-                   doc in enumerate(record_data)]
-
-    #train the Doc2vec model
-    model = Doc2Vec(vector_size=100, min_count=1, epochs=50, seed=42, workers=8)
-    print("building vocab")
-    model.build_vocab(tagged_data)
-    print("training model")
-    model.train(tagged_data, total_examples=model.corpus_count, epochs=model.epochs)
-
-    #save the model to a file
-    model.save("test_doc2vec_model.model")
-    sys.exit(0)
-
-    new_document = "lovastatin"
-    token = word_tokenize(new_document.lower())
-    new_vector = model.infer_vector(token)
-    print(len(record_data))
-
-    similar_docs = model.dv.most_similar([new_vector], topn=10)
-    for tag, similarity in similar_docs:
-        print(f"Document tag: {tag}, Similarity: {similarity}") 
-        print(record_data[int(tag)], "\n")
-
+    """
 if __name__ == "__main__":
     main()

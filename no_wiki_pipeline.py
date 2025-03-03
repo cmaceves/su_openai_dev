@@ -4,13 +4,17 @@ import sys
 import json
 import requests
 import wikidata.client
-
+import itertools
+from itertools import combinations
 from joblib import Parallel, delayed
 from sklearn.metrics.pairwise import cosine_similarity
 import prompts
 import util
 import wiki_pipeline
 import numpy as np
+
+import networkx as nx
+import matplotlib.pyplot as plt
 
 name_lookup_url = "https://name-lookup.transltr.io/lookup"
 node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="
@@ -22,6 +26,46 @@ uniprot_types = ["Protein"]
 hp_types = ['Phenotypic Feature']
 
 client = wikidata.client.Client()
+
+def extract_pathway_pairs(pathways):
+    all_pairs = []
+    for pathway in pathways:
+        pairs = [(pathway[i], pathway[i + 1]) for i in range(len(pathway) - 1)]
+        for pair in pairs:
+            if pair in all_pairs:
+                continue
+            else:
+                all_pairs.append(pair)
+
+    all_pairs_strings = []
+    for pair in all_pairs:
+        tmp = pair[0] + " " + pair[1]
+        all_pairs_strings.append(tmp)
+
+    return(all_pairs_strings, all_pairs)
+
+def generate_pairs(terms):
+    # Generate all pairwise combinations
+    pairs = [" ".join(pair) for pair in combinations(terms, 2)]
+    return pairs
+
+def create_graph_image(edges, figure_file, drug, disease):
+    G = nx.DiGraph()
+    G.add_edges_from(edges)
+
+    """
+    plt.figure(figsize=(10, 8))  # Set the figure size
+    pos = nx.spring_layout(G, k=1, iterations=100)  # Increase k and iterations
+    nx.draw(G, pos, with_labels=True, node_color="skyblue", edge_color="gray", node_size=2000, font_size=15, arrows=True)
+
+    plt.savefig(figure_file, format="PNG", dpi=300)
+    """
+    all_paths = list(nx.all_simple_paths(G, source=drug, target=disease))
+
+    # Print each path
+    #for i, path in enumerate(all_paths, 1):
+    #    print(f"Path {i}: {path}")
+    return(all_paths)
 
 def find_databases(node_type):
     databases = []
@@ -40,7 +84,6 @@ def ground_embedding_space(nodes, mechanism_paragraph, grounded_node_type):
     
     found_identifiers = {}
     for node in nodes:
-        print("node", node)
         node_type = grounded_node_type[node]
         databases = find_databases(node_type)
 
@@ -61,13 +104,14 @@ def ground_embedding_space(nodes, mechanism_paragraph, grounded_node_type):
         labels = []
         label_string = ""
         counter = 1
-        print("databases", databases)
         if len(databases) == 0:
             found_identifiers[node] = ""
             continue
 
         for j, (key, value) in enumerate(master_dict.items()):
             if j in indexes:
+                if "clocortolone pivalate" in node:
+                    print(node, key, value)
                 database_tmp = key.split(":")
             
                 if len(database_tmp) == 1:
@@ -92,7 +136,6 @@ def ground_embedding_space(nodes, mechanism_paragraph, grounded_node_type):
         try:
             index = int(resp)-1
         except:
-            print(resp)
             found_identifiers[node] = ""
             continue
         try:
@@ -326,9 +369,10 @@ def alternate_mechanism_one_shot(term1, term2, predicate_data):
 
 def main(indication, predicate_json):
     entity_json = "./predicates/entities.json"
-    literature_dir = "./no_wiki_text"
+    literature_dir = "./no_follow"
     category_definitions = "./predicates/category_definitions.json"
     name_lookup_url = "https://name-lookup.transltr.io/lookup"
+
     with open(category_definitions, "r") as cfile:
         record_category_def = json.load(cfile)
     with open(entity_json, "r") as jfile:
@@ -344,6 +388,7 @@ def main(indication, predicate_json):
 
     category_string = ""
     categories = []
+    
     for i, t in enumerate(record_category_def.keys()):
         category_string += str(i) + "." + t + "\n"
         categories.append(t)
@@ -354,96 +399,69 @@ def main(indication, predicate_json):
     for node in indication['nodes']:
         node_identifiers.append(node['id'])
         node_names.append(node['name'].lower())
+    #TESTLINES
+    node_names[0] = "atropine sulphate"
+    node_names[-1] = "H5N1"
     basename = node_names[0] + "_" + node_names[-1] + ".json"
     basename = basename.replace(" ","_")
     output_filename = os.path.join(literature_dir, basename)
     #if os.path.isfile(output_filename):
     #    return
-
-    all_triples = alternate_mechanism_one_shot(node_names[0], node_names[-1], predicate_data)
-    #pull out all nodes for the mechanism
-    unique_nodes = []
-    for triple in all_triples:
-        if triple[0] not in unique_nodes:
-            unique_nodes.append(triple[0])
-        if triple[-1] not in unique_nodes:
-            unique_nodes.append(triple[-1])
-
-    string_version = ""
-    for i, triple in enumerate(all_triples):
-        if i != 0:
-            string_version += ". "
-        tmp = " ".join(triple)
-        string_version += tmp
-    mechanism_paragraph, prompt  = prompts.mech_paragraph_form(string_version)
-
-    category_messages = []
-    for k, v in record_category_def.items():
-        category_messages.extend(v)
     
-    #type ground the nodes 
-    grounded_types = ground_node_types(unique_nodes, record_category_def, category_string)
-    print(grounded_types)
+    #given the new list of entities, generate a mechanism of action paragraph description
+    mechanism_paragraph, resp = prompts.chain_of_thought_4(node_names[0], node_names[-1])
 
-    #ground_name_lookup(unique_nodes, mechanism_paragraph, grounded_types)
-    found_identifiers = ground_embedding_space(unique_nodes, mechanism_paragraph, grounded_types)
-    output_data = {"triples":all_triples, "grounded_nodes":found_identifiers, "grounded_types": grounded_types}
-    print(found_identifiers)
-    with open(output_filename, 'w') as ofile:
-        json.dump(output_data, ofile)
-    return
-    #HERE
+    print(mechanism_paragraph)
 
-    node_dictionary = {}
-    for un in unique_nodes:
-        node_dictionary[un] = [un]
+    """
+    #generates additional questions
+    questions, resp = prompts.chain_of_thought_questions(node_names[0], node_names[-1], mechanism_paragraph)
+    print("\n")
+    print(questions)
     
-    sys.exit(0)
+    #answers additional questions in paragraph form
+    answers, resp = prompts.chain_of_thought_answer_questions(questions)
+    print("\n")
+    print(answers)
+    answers = answers.split("\n")
+    paragraph = [x.split(". ")[-1] for x in answers]
+    paragraph = " ".join(paragraph)
+    """
 
-    first_pass_grounding = wikidata_grounding(unique_nodes)    
-    print(first_pass_grounding)
-    sys.exit(0)
-    ungrounded_nodes = []
-    for key, value in first_pass_grounding.items():
-        if len(value) == 0:
-            ungrounded_nodes.append(key)
-            param  = {"string": key}
-            resp = requests.post(name_lookup_url, params=param)
-            all_matches = resp.json()
-            match_string = ""
-            for i, match in enumerate(all_matches):
-                match_string += str(i+1) + ". " + str(match) + "\n"
-            resp, prompt = prompts.alternate_pick_grounding(key, match_string)
-            for x in all_matches:
-                print(x)
-
-            match  = all_matches[int(resp)-1]['curie']
-            print(key, match)            
-            sys.exit(0)
-    print(all_triples)
-    sys.exit(0) 
-    return
-
-    first_pass_grounding = ground_node_terms(node_dictionary)
-    expand_nodes = []
-    for key, value in first_pass_grounding.items():
-        if key not in value:
-            expand_nodes.append(key)
-            continue
-        val = value[key]
-        if len([x for x in val if x != '']) == 0:
-            expand_nodes.append(key)
+    predicate_string = ""
+    for i, k in enumerate(predicate_data.keys()):
+        predicate_string += str(i+1) + ". " + k + "\n"
     
-    #expand to synonyms
-    expanded_nodes = expand_node_terms(expand_nodes, grounded_types, category_messages)
-    grounded_nodes = ground_node_terms(expanded_nodes)
-    for key, val in first_pass_grounding.items():
-        grounded_nodes[key] = val 
+    mp = mechanism_paragraph #+ "\n" + paragraph
+    entity_string, prompt = prompts.extract_entities(mp)
+    entities = entity_string.split("\n")
+    entities = [x.split(". ")[-1] for x in entities]
+    print("\n")
+    print(entity_string)
 
-    print(grounded_nodes)    
-    output_data = {"triples":all_triples, "expanded_nodes":expanded_nodes, "grounded_nodes":grounded_nodes, "grounded_types": grounded_types}
+    resp, prompt = prompts.chain_of_thought_5(mp, predicate_string, node_names[0], entity_string)
+    triples = []
+    seen_targets = [node_names[0]]
+
+    tmp_triples = resp.split("\n")
+    tmp_triples = [x.split(". ")[-1].lower() for x in tmp_triples]
+    triples.extend(tmp_triples)
+    for i, target in enumerate(entities):
+        print(i/len(entities))
+        resp, prompt = prompts.chain_of_thought_5(mp, predicate_string, target, entity_string)
+        tmp_triples = resp.split("\n")
+        tmp_triples = [x.split(". ")[-1].lower() for x in tmp_triples]
+        triples.extend(tmp_triples)
+
+    triple_string = ""
+    for i, trip in enumerate(triples):
+        triple_string += str(i+1) + ". " + trip.lower() + "\n"
+    print(triple_string)
+    graph = prompts.get_pathway(node_names[0], node_names[-1], mp, triple_string)
+    questions = ""
+    answers = ""
+    output_data = {"questions": questions, "answers": answers, "triples": triples, "entities": entities, "mechanism_paragraph": mp, "graph": graph}
     sys.exit(0)
-    #return
     with open(output_filename, 'w') as ofile:
         json.dump(output_data, ofile)
 
