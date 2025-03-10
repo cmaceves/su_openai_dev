@@ -10,16 +10,6 @@ embedding_dir  = "/home/caceves/su_openai_dev/embeddings"
 supporting_file_dir = "/home/caceves/su_openai_dev/batch_request_outputs"
 definition_dir = "/home/caceves/su_openai_dev/parsed_databases"
 
-def save_h5_file():
-    #this is reformatting to h5py
-    hdf5_filename = "./concat_databases/ncbitaxon.h5"
-    all_embedding_files = [os.path.join(embedding_dir, x) for x in os.listdir(embedding_dir) if database in x]
-    with h5py.File(hdf5_filename, "w") as hdf5_file:
-        for i, filename in enumerate(all_embedding_files):           
-            tmp_array = load_array(filename)
-            dataset_name = os.path.basename(filename)
-            dataset = hdf5_file.create_dataset(dataset_name, data=tmp_array, compression="gzip", compression_opts=9) 
-
 def parse_diseases_of_drugs(indication_json, drugs):
     """
     For every drug return all associated diseases.
@@ -71,33 +61,32 @@ for filename in all_embedding_files:
     tmp = os.path.join(definition_dir, database + "_definitions.json") 
     all_name_files.append(tmp)
 
-for i, (drug, diseases) in enumerate(all_disease_dict.items()):
-    drug = "irritable bowel disease"
-    for embedding_file, supporting_file, name_file in zip(all_embedding_files, all_supporting_files, all_name_files):
-        term_ids = []
-        term_definitions = []
-        #if "mesh" not in name_file:
-        #    continue
-        with open(supporting_file, 'r') as mfile:
-            for line in mfile:
-                data = json.loads(line)
-                term_id = data['custom_id']
-                term_ids.append(term_id)
-                term_def = data['response']['body']['choices'][0]['message']['content']
-                term_definitions.append(term_def)
-        with open(name_file, 'r') as nfile:
-            name_data = json.load(nfile)
-        openai_embedding = load_array(embedding_file)
-        keys, defs = fetch_openai_scores(drug, openai_embedding, term_ids, term_definitions, 100)
-        print(drug)
-        #print(diseases)
-        for key, definition in zip(keys, defs):
-            for value in name_data:
-                if value['accession'] == key:
-                    name = value['name']
-                    break
-            print(key, name)
-    sys.exit(0)
+#for i, (drug, diseases) in enumerate(all_disease_dict.items()):
+drug = "lovastatin"
+for embedding_file, supporting_file, name_file in zip(all_embedding_files, all_supporting_files, all_name_files):
+    term_ids = []
+    term_definitions = []
+    if "mesh" not in name_file:
+        continue
+    with open(supporting_file, 'r') as mfile:
+        for line in mfile:
+            data = json.loads(line)
+            term_id = data['custom_id']
+            term_ids.append(term_id)
+            term_def = data['response']['body']['choices'][0]['message']['content']
+            term_definitions.append(term_def)
+    with open(name_file, 'r') as nfile:
+        name_data = json.load(nfile)
+    openai_embedding = load_array(embedding_file)
+    keys, defs = fetch_openai_scores(drug, openai_embedding, term_ids, term_definitions, 50)
+    print(drug)
+    for key, definition in zip(keys, defs):
+        for value in name_data:
+            if value['accession'] == key:
+                name = value['name']
+                break
+        print(key, name)
+sys.exit(0)
 
 
 

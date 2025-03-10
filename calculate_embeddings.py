@@ -15,9 +15,8 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
-output_dir = "/home/caceves/su_openai_dev/batch_request_outputs"
 
-def process_embedding(prefix):
+def process_embedding(prefix, output_dir):
     formatting_dir = "/home/caceves/su_openai_dev/embedding_request_formatted"
 
     #should already be in <50k chunks
@@ -40,27 +39,13 @@ def process_embedding(prefix):
         for value in format_inputs:
             jsonl_file.write(json.dumps(value) + "\n")
 
+def batch_request_formatting(prefix, database_name, output_prefix, system_prompt):
     """
-    token_counts = calculate_tokens_per_chunk(texts)
-    batches = create_batches(token_counts)
-    all_embeddings = []
-    for i, batch in enumerate(batches):
-        if i % 100 == 0:
-            print("batch:", i)
-        tmp = []
-        for index in batch:
-            tmp.append(texts[index])
-        embeddings = get_embeddings(tmp)
-        all_embeddings.extend(embeddings)
-
-    all_embeddings = np.array(all_embeddings)
-    save_array(all_embeddings, "openai_%s_embeddings.npy"%output_prefix)
+    prefix : prefix of the database being processed
+    database_name : the full path to the database to process
+    output_prefix : the directory to save the formatted batch requests to
+    system_prompt : the system prompt
     """
-
-def batch_request_formatting(prefix):
-    database_name = "/home/caceves/su_openai_dev/parsed_databases/%s_definitions.json"%prefix
-    output_prefix = "/home/caceves/su_openai_dev/batch_request_formatted"
-    system_prompt = "Given a biochemical entity describe it and define it's function in under 150 tokens"
     requests = []
     with open(database_name, 'r') as dfile:
         data = json.load(dfile)
@@ -85,7 +70,7 @@ def batch_request_formatting(prefix):
                 jsonl_file.write(json.dumps(value) + "\n")
    
 
-def upload_embedding_batch(filename, prefix):
+def upload_embedding_batch(filename, prefix, output_dir):
     """
     Upload a batch of pre-formatted requests to the OpenAI API embeddings.
     """
@@ -104,7 +89,7 @@ def upload_embedding_batch(filename, prefix):
         json.dump(output_dict, ofile)
 
 
-def upload_batch(filename, prefix):
+def upload_batch(filename, prefix, output_dir):
     """
     Upload a batch of pre-formatted requests to the OpenAI API.
     """
@@ -122,7 +107,7 @@ def upload_batch(filename, prefix):
     with open(output_file, "w") as ofile:
         json.dump(output_dict, ofile)
 
-def check_batch_status(basename):
+def check_batch_status(basename, output_dir):
     #defines the batch param filename
     filename = os.path.join(output_dir, basename+"_params.txt")
     with open(filename, "r") as ffile:
@@ -138,7 +123,7 @@ def check_batch_status(basename):
         with open(filename, 'w') as ffile:
             json.dump(data, ffile)
     
-def retrieve_batch(basename):
+def retrieve_batch(basename, output_dir):
     filename = os.path.join(output_dir, basename+"_params.txt")
     output_filename = os.path.join(output_dir, basename+"_results.json")
 
@@ -158,24 +143,29 @@ def retrieve_batch(basename):
             jfile.write(output_data)
 
 def main():
-    upload = True
+    upload = False
     check = False
 
-    embeddings = False
+    embeddings = True
     embeddings_check = False
 
     #this will yield however many batches are present in the database
-    database_name = "interpro"
-    
+    database_name = "reactome"
+    output_dir = "/home/caceves/su_openai_dev/batch_request_outputs"
+
     if upload:
-        batch_request_formatting(database_name)
+        database_full = "/home/caceves/su_openai_dev/parsed_databases/%s_definitions.json"%database_name
+        output_prefix = "/home/caceves/su_openai_dev/batch_request_formatted"
+        system_prompt = "Given a biochemical entity describe it and define it's function in under 150 tokens"
+        
+        batch_request_formatting(database_name, database_full, output_prefix, system_prompt)
         #get all batches for this database
         format_dir = "/home/caceves/su_openai_dev/batch_request_formatted"
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
         #upload the batches
         for batch in all_batches:
             basename = os.path.basename(batch).replace(".jsonl", "")
-            upload_batch(batch, basename)
+            upload_batch(batch, basename, output_dir)
     
     #check the batch status and if it's complete retrieve it
     if check:
@@ -184,8 +174,8 @@ def main():
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
         for batch in all_batches:
             basename = os.path.basename(batch).replace(".jsonl", "")
-            check_batch_status(basename)
-            retrieve_batch(basename)
+            check_batch_status(basename, output_dir)
+            retrieve_batch(basename, output_dir)
 
     if embeddings:
         #here we grab the actual embedding vector
@@ -201,17 +191,17 @@ def main():
             if os.path.isfile(output_file):
                 continue
 
-            process_embedding(basename)
+            process_embedding(basename, output_dir)
             filename = os.path.join("/home/caceves/su_openai_dev/embedding_request_formatted", basename+"_embedding.jsonl")
-            upload_embedding_batch(filename, prefix)
+            upload_embedding_batch(filename, prefix, output_dir)
 
     if embeddings_check:
         format_dir = "/home/caceves/su_openai_dev/embedding_request_formatted"
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
         for batch in all_batches:
             basename = os.path.basename(batch).replace("_embedding.jsonl", "_vectors")
-            check_batch_status(basename)
-            retrieve_batch(basename)
+            check_batch_status(basename, output_dir)
+            retrieve_batch(basename, output_dir)
 
 
 if __name__ == "__main__":

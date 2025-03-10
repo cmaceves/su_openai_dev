@@ -41,8 +41,8 @@ evaluation_indications = util.parse_indication_paths(indication_json)
 uniprot_json = "/home/caceves/su_openai_dev/gpt_databases_def/uniprot_def_1.json"
 
 #load the scibert information
-tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.1")
-model = AutoModel.from_pretrained("dmis-lab/biobert-base-cased-v1.1")
+#tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.1")
+#model = AutoModel.from_pretrained("dmis-lab/biobert-base-cased-v1.1")
 
 def check_label_matching(protein_dict):
     """
@@ -153,14 +153,15 @@ def create_batches(token_counts, token_limit=8192):
     
     return batches
 
-def fetch_openai_scores(term, loaded_array, uniprot_order, uniprot_def, matching_term):
+def fetch_openai_scores(term, loaded_array, uniprot_order, uniprot_def, n=10):
+    """
+    """
     #get the top 50 results for close openai matches
     embedding_1 = get_embeddings([term])
     embedding_1 = np.array(embedding_1)
     distances = calculate_distances(loaded_array, embedding_1)
-    all_keys = uniprot_order
 
-    zipped = list(zip(distances, all_keys, uniprot_def))
+    zipped = list(zip(distances, uniprot_order, uniprot_def))
     zipped.sort()
     distances, all_keys, uniprot_def = zip(*zipped)
     distances = list(distances)
@@ -169,11 +170,9 @@ def fetch_openai_scores(term, loaded_array, uniprot_order, uniprot_def, matching
 
     final_keys = []
     final_defs = []
-    for i in range(10):
+    for i in range(n):
         final_keys.append(all_keys[i])
         final_defs.append(uniprot_def[i])
-        #print(distances[i], all_keys[i], uniprot_def[i], matching_term)
-    #sys.exit(0)
     return(final_keys, final_defs)
 
 def fetch_scibert_scores(term, loaded_array, uniprot_order):
@@ -247,7 +246,7 @@ def main():
     random_selection = random.sample(list(human_proteins.keys()), 50)
     random_proteins = {key : human_proteins[key] for key in random_selection}
 
-    openai_loaded_array = load_array("openai_uniprot_embeddings_basic.npy")
+    openai_loaded_array = load_array("openai_uniprot_embeddings.npy")
     scibert_loaded_array = load_array("scibert_uniprot_embeddings.npy")
 
     #uniprot names
