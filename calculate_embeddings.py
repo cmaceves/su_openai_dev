@@ -6,7 +6,7 @@ import sys
 import json
 import requests
 import numpy as np
-from testing_grounding_strategies import save_array, calculate_tokens_per_chunk, create_batches, get_embeddings
+from testing_grounding_strategies import save_array, create_batches, get_embeddings
 import openai
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -18,10 +18,12 @@ client = OpenAI()
 
 def process_embedding(prefix, output_dir):
     formatting_dir = "/home/caceves/su_openai_dev/embedding_request_formatted"
+    original_parsed_data = "/home/caceves/su_openai_dev/parsed_databases/%s_definitions.json"
 
     #should already be in <50k chunks
     definition_filename = os.path.join(output_dir, prefix+"_results.json")
-
+    print("need to include original definition")
+    sys.exit(0)
     text_definitions = []
     custom_ids = []
     with open(definition_filename, "r") as dfile:
@@ -31,6 +33,7 @@ def process_embedding(prefix, output_dir):
             text_definitions.append(definition)
             custom_ids.append(data['custom_id'])
     format_inputs = []
+
     for definition, custom_id in zip(text_definitions, custom_ids):
         tmp = {"custom_id": "%s"%custom_id, "method": "POST", "url": "/v1/embeddings", "body": {"model": "text-embedding-ada-002", "input": "%s"%definition}}
         format_inputs.append(tmp)
@@ -39,18 +42,22 @@ def process_embedding(prefix, output_dir):
         for value in format_inputs:
             jsonl_file.write(json.dumps(value) + "\n")
 
-def batch_request_formatting(prefix, database_name, output_prefix, system_prompt):
+def batch_request_formatting(prefix, database_name, output_prefix, system_prompt, description=False):
     """
     prefix : prefix of the database being processed
     database_name : the full path to the database to process
     output_prefix : the directory to save the formatted batch requests to
     system_prompt : the system prompt
+    description : do we include the entity description in the request or not
     """
     requests = []
     with open(database_name, 'r') as dfile:
         data = json.load(dfile)
     for i, record in enumerate(data):
-        request = {"custom_id": "%s"%record['accession'], "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-3.5-turbo", "messages": [{"role": "system", "content": "%s"%system_prompt},{"role": "user", "content": "%s"%record['name']}],"max_tokens": 200, "temperature":0}}
+        if not description:
+            request = {"custom_id": "%s"%record['accession'], "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-3.5-turbo", "messages": [{"role": "system", "content": "%s"%system_prompt},{"role": "user", "content": "%s"%record['name']}],"max_tokens": 200, "temperature":0}}
+        else:
+            request = {"custom_id": "UNIPROT:%s"%record['accession'], "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-3.5-turbo", "messages": [{"role": "system", "content": "%s"%system_prompt},{"role": "user", "content": "%s - %s"%(record['name'], record['description'])}],"max_tokens": 200, "temperature":0}}
         requests.append(request)
     counter = 1
     tmp = []
@@ -146,11 +153,11 @@ def main():
     upload = False
     check = False
 
-    embeddings = True
-    embeddings_check = False
+    embeddings = False
+    embeddings_check = True
 
     #this will yield however many batches are present in the database
-    database_name = "reactome"
+    database_name = "uniprot"
     output_dir = "/home/caceves/su_openai_dev/batch_request_outputs"
 
     if upload:
@@ -159,6 +166,7 @@ def main():
         system_prompt = "Given a biochemical entity describe it and define it's function in under 150 tokens"
         
         batch_request_formatting(database_name, database_full, output_prefix, system_prompt)
+
         #get all batches for this database
         format_dir = "/home/caceves/su_openai_dev/batch_request_formatted"
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]

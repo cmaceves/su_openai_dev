@@ -24,8 +24,8 @@ mesh_types = ["Chemical Substance", "Disease", "Drug"]
 chebi_types = ["Chemical Substance"]
 uniprot_types = ["Protein"]
 hp_types = ['Phenotypic Feature']
+node_types = ['Biological Process', 'Cell', 'Cellular Component', 'Chemical Substance', 'Disease', 'Drug', 'Gene Family', "Gross Anatomical Structure", "Macromolecular Structure", "Molecular Activity", "Organism Taxon", "Pathway", "Phenotypic Feature", "Protein"]
 
-client = wikidata.client.Client()
 
 def extract_pathway_pairs(pathways):
     all_pairs = []
@@ -399,9 +399,6 @@ def main(indication, predicate_json):
     for node in indication['nodes']:
         node_identifiers.append(node['id'])
         node_names.append(node['name'].lower())
-    #TESTLINES
-    node_names[0] = "atropine sulphate"
-    node_names[-1] = "H5N1"
     basename = node_names[0] + "_" + node_names[-1] + ".json"
     basename = basename.replace(" ","_")
     output_filename = os.path.join(literature_dir, basename)
@@ -435,9 +432,22 @@ def main(indication, predicate_json):
     mp = mechanism_paragraph #+ "\n" + paragraph
     entity_string, prompt = prompts.extract_entities(mp)
     entities = entity_string.split("\n")
-    entities = [x.split(". ")[-1] for x in entities]
+    entities = [x.split(". ")[-1].lower() for x in entities]
+
+    entity_definitions = {}
+    entity_types = {}
     print("\n")
     print(entity_string)
+    for entity in entities:
+        definition, prompt = prompts.define_nodes(entity)
+        index, prompt = prompts.type_nodes(entity + "-" + definition)
+        try:
+            index = int(index)-1
+            node_type = node_types[index] 
+        except:
+            continue
+        entity_types[entity] = node_type
+        entity_definitions[entity] = definition
 
     resp, prompt = prompts.chain_of_thought_5(mp, predicate_string, node_names[0], entity_string)
     triples = []
@@ -456,12 +466,13 @@ def main(indication, predicate_json):
     triple_string = ""
     for i, trip in enumerate(triples):
         triple_string += str(i+1) + ". " + trip.lower() + "\n"
+
     print(triple_string)
     graph = prompts.get_pathway(node_names[0], node_names[-1], mp, triple_string)
     questions = ""
     answers = ""
-    output_data = {"questions": questions, "answers": answers, "triples": triples, "entities": entities, "mechanism_paragraph": mp, "graph": graph}
-    sys.exit(0)
+    output_data = {"questions": questions, "answers": answers, "triples": triples, "entities": entities, "mechanism_paragraph": mp, "graph": graph, "entity_types":entity_types, "entity_definitions":entity_definitions}
+
     with open(output_filename, 'w') as ofile:
         json.dump(output_data, ofile)
 

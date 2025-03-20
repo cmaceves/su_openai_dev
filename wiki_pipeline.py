@@ -30,6 +30,7 @@ def camel_to_words(camel_str):
     # Replace lowercase or digits followed by uppercase letters
     words = re.sub('([a-z\d])([A-Z])', r'\1 \2', words)
     return words
+
 def remove_parentheses(text):
     # Define the regex pattern to match parentheses and text within them
     pattern = r'\(.*?\)'

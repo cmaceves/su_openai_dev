@@ -53,8 +53,7 @@ def basic_confusion(eval_identifiers, grounded_identifiers):
     for gid in grounded_identifiers:
         if gid not in eval_identifiers:
             false_positive += 1
-
-    print("TP", true_positive, "FP", false_positive, "FN", false_negative)
+    return(true_positive, false_positive, false_negative)
 
 def graph_alignment(nodes_1, nodes_2):
 
@@ -79,6 +78,11 @@ def main():
     #TESTLINES
     no_length = 0
     length = 0
+
+    #evaluate all nodes for the test set
+    matches = 0
+    mismatches = 0
+    not_attempted = 0
     for i, json_file in enumerate(all_json_files):
         with open(json_file, 'r') as jfile:
             data = json.load(jfile)
@@ -98,11 +102,11 @@ def main():
             tmp_disease = eval_net['graph']['disease']
             if tmp_drug.lower() == drug.lower() and tmp_disease.lower() == disease.lower():
                 found = True
+                eval_nodes = eval_net['nodes']
                 break
         if not found:
             continue
 
-        eval_nodes = eval_net['nodes']        
         if len(eval_nodes) != len(grounded_nodes):
             no_length += 1
         else:
@@ -110,18 +114,31 @@ def main():
 
         grounded_identifiers = list(grounded_nodes.values())
         eval_identifiers = [x['id'] for x in eval_nodes]
-
         all_eval_nodes = [x['name'] for x in eval_nodes]    
 
-        basic_confusion(eval_identifiers, grounded_identifiers)
+        true_positive, false_positive, false_negative = basic_confusion(eval_identifiers, grounded_identifiers)
         score_nodes_eval, score_nodes_exp = graph_alignment(all_eval_nodes, all_nodes)
-        print(score_nodes_eval)
-        print(score_nodes_exp)
+           
+        #score the aligned graphs
+        eval_dict = dict(zip(all_eval_nodes, eval_identifiers))               
+        print("\neval", score_nodes_eval)
+        print("exp", score_nodes_exp)
+        for gt, exp in zip(score_nodes_eval, score_nodes_exp):
+            exp_id = grounded_nodes[exp]
+            gt_id = eval_dict[gt]
+            if exp_id != gt_id and exp_id != "":
+                print(gt_id, exp_id)
+                print(gt, exp)
+                mismatches += 1
+            if exp_id == "":
+                not_attempted += 1
+            if exp_id == gt_id:
+                matches += 1
+        #matches = matches-2
+        #sys.exit(0)
         #search_literature_support()
-        sys.exit(0)
 
-    print(length)
-    print(no_length)
+    print("match", matches, "mis", mismatches, "not tried", not_attempted)
 
 if __name__ == "__main__":
     main()

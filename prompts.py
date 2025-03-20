@@ -9,6 +9,74 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
+def fuzzy_nodes(entity_string):
+    #given a set of biological entities, "fuzzy" them up.
+    prompt =[
+          {"role": "system", "content": 
+              """You will be given a numbered list of biological and chemical entities. Your job is to "fuzzy" each entity by changing the word or phrase while still maintaining the same meaning. Please create a json object where the key is the input entity and the value is the "fuzzy" version of that entity."""},
+          {"role": "user", "content": "%s"%(entity_string)}
+      ]
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt,
+    temperature = 0,
+    response_format={"type": "json_object" }
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+def define_nodes(node):
+    prompt =[
+          {"role": "system", "content": 
+           """Given a biochemical entity describe it and define it's function in under 150 tokens"""},
+          {"role": "user", "content": "%s"%(node)}
+      ]
+
+    completion = client.chat.completions.create(
+    model="gpt-4",
+    messages=prompt,
+    temperature = 0,
+    max_tokens=200
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+def type_nodes(node):
+    prompt =[
+          {"role": "system", "content": 
+           """
+           You will be given a term and it's description. Please categorize it into one of the following categories. Return only the number of the assigned category with no additional commentary or formatting.
+1. Biological Process
+2. Cell
+3. Cellular Component
+4. Chemical Substance
+5. Disease
+6. Drug
+7. Gene Family
+8. Gross Anatomical Structure
+9. Macromolecular Complex
+10. Molecular Activity
+11. Organism Taxon
+12. Pathway
+13. Phenotypic Feature
+14. Protein
+           """},
+          {"role": "user", "content": "%s"%(node)}
+      ]
+
+
+    completion = client.chat.completions.create(
+    model="gpt-4",
+    messages=prompt,
+    temperature = 0
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
 def chain_of_thought_5(paragraph, predicate_string, target_entity, entity_string):
     prompt =[
           {"role": "system", "content": 
@@ -240,7 +308,7 @@ def extract_triples(paragraph, entity_1, predicates):
 def extract_entities(paragraph):
     messages = [{"role": "system", "content": """
     Task:
-    You are a helpful assistant. Please extract all biological and chemical entities contained within the provided text, that fall into the following categories: cell types, cell substructures, receptors, proteins, drugs, genes, biological processes, macromolecular complexes, small molecules, diseases, phenotypic feature, pathway, organism taxon, molecular activity, or anatomical structure. Return them as a numbered list with no additional commentary. Please be exaughstive in returning entities within the given categories. Do not return the the same entity twice, and be specific with names as opposed to giving general categories.
+    Please extract all biological and chemical entities and processes contained within the provided text, that fall into the following categories: cell types, cell substructures, receptors, proteins, drugs, genes, biological processes, macromolecular complexes, small molecules, diseases, phenotypic feature, pathway, organism taxon, molecular activity, or anatomical structure. Return them as a numbered list with no additional commentary. Please be exaughstive in returning entities within the given categories. Do not return the the same entity twice, and be specific with names as opposed to giving general categories.
     Example Output Format:
     1. Entity1
     2. Entity2
@@ -379,34 +447,6 @@ def contract_terms(terms):
     response = str(completion.choices[0].message.content)
     return(response, messages)
 
-
-def choose_wikidata_match(term, page_strings):
-    messages = [{"role": "system", "content": """
-    Task:
-    You will be given a term, and list of webpages and their descriptions. Your job is to select the webpage which best matches the term in a biomedical context from the given numbered list of webpages and descriptions of their content. Some webapges may be missing descriptions. Return only the number of the best equivalent webpage, with no additional commentary or formatting. 
-    Example Input Format:
-    Term: Text
-    Webpages:
-    1. Page1 - Description1
-    2. Page2 - Description2
-    3. Page3
-    Example Output Format:
-    3
-    """},
-    {"role":"user", "content":
-    """
-    Term: %s
-    Webpages:
-    %s
-    """%(term, page_strings)}]
-
-    completion = client.chat.completions.create(
-    model="gpt-4o",
-    messages=messages,
-    temperature=0
-    )
-    response = str(completion.choices[0].message.content)
-    return(response, messages)
 
 def chain_of_thought(drug, disease):
     prompt =[
@@ -623,7 +663,7 @@ def alternate_ground_predicates(term1, term2, predicate, messages, category_stri
 def test_node_grounding(database, node_name):
     prompt =[
           {"role": "system", "content": "You are a helpful assistant."},
-          {"role": "user", "content": "What is the structured identifier for '%s' in the %s database? Please return the identifier with no additional commentary, or 'not found' if no identifier can be found."%(node_name, database)}
+          {"role": "user", "content": """What is the structured identifier for '%s' in the %s database? Please return ten closest identifiers as a list in the following format  with no additional commentary: ["identifier1", "identifier2", "identifier3", ...]"""%(node_name, database)}
       ]
 
     completion = client.chat.completions.create(
