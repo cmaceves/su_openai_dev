@@ -5,6 +5,7 @@ import requests
 import random
 random.seed(42)
 import numpy as np
+import openai
 from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv('.env')
@@ -13,6 +14,7 @@ client = OpenAI()
 from bs4 import BeautifulSoup
 from xml.etree import ElementTree as ET
 from joblib import Parallel, delayed
+from scipy.spatial.distance import cdist
 import prompts
 import networkx as nx
 
@@ -95,6 +97,22 @@ def pubmed_search_json(term, max_results=10):
             #abstracts[pmid] = abstract_text.strip()
         all_titles.append(titles)
     return(abstracts, all_titles)
+
+def save_array(array, filename):
+    np.save(filename, array)
+
+def load_array(filename):
+    return np.load(filename)
+
+def get_embeddings(texts, model="text-embedding-ada-002"):
+    response = openai.embeddings.create(input=texts, model=model)
+    embeddings = [res.embedding for res in response.data]
+    return embeddings
+
+# Calculate distances between target vector and all vectors in the array
+def calculate_distances(array, target_vector, metric='euclidean'):
+    distances = cdist(array, target_vector, metric=metric)
+    return distances.flatten()
 
 def parse_indication_paths(indication_json, n=None):
     """

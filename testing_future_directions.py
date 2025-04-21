@@ -3,7 +3,8 @@ import sys
 import json
 import numpy as np
 import util
-from testing_grounding_strategies import load_array, get_embeddings, fetch_openai_scores, save_array
+from util import load_array, save_array, get_embeddings
+from testing_grounding_strategies import fetch_openai_scores
 
 embedding_dir  = "/home/caceves/su_openai_dev/embeddings"
 supporting_file_dir = "/home/caceves/su_openai_dev/batch_request_outputs"
@@ -68,8 +69,9 @@ for filename in all_embedding_files:
     all_type_files.append(tmp)
 
 for i, (drug, diseases) in enumerate(all_disease_dict.items()):
-    if i < 2:
+    if i < 1:
         continue
+    drug = "lovastatin"
     for embedding_file, supporting_file, name_file, type_file in zip(all_embedding_files, all_supporting_files, all_name_files, all_type_files):
         term_ids = []
         term_definitions = []
@@ -97,7 +99,7 @@ for i, (drug, diseases) in enumerate(all_disease_dict.items()):
                     name = value['name']
                     break
             if type_data[key] == "Disease":        
-                print(key, name, type_data[key])
+                print(name), #type_data[key])
     sys.exit(0)
 
 

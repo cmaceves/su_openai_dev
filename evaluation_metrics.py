@@ -157,7 +157,17 @@ def randomly_select_nodes(ground_truth_nodes, indications):
     """
     Pick negative control nodes for comparison.
     """
-
+    all_nodes = []
+    gt_ids = list(ground_truth_nodes.values())
+    for indication in indications:
+        nodes = indication['nodes']
+        #node id values
+        tmp = [x['id'] for x in indication['nodes']]
+        for t, n in zip(tmp, nodes):
+            if t not in gt_ids:
+                all_nodes.append(n)
+    random_selection = random.sample(all_nodes, len(gt_ids)) 
+    return(random_selection)
 
 def negative_control():
     """
@@ -174,16 +184,13 @@ def negative_control():
     all_entries = [os.path.join(literature_dir, x) for x in os.listdir(literature_dir)]
     all_node_scores = []
     for i, entry in enumerate(all_entries):
-        #TESTLINES
-        if "clofedanol" not in entry:
-            continue
         output_filename = os.path.join(negative_dir, os.path.basename(entry))
-        #if os.path.isfile(output_filename):
-        #    continue
+        if os.path.isfile(output_filename):
+            continue
         output_dict = {}
         with open(entry, 'r') as efile:
             data = json.load(efile)
-        
+            
         #find the ground truth
         ground_truth_names = {}
         for key in evaluation_indications:
@@ -195,59 +202,28 @@ def negative_control():
                     ground_truth_names[x['name']] = x['id']
                 break
 
-        randomly_select_nodes(ground_truth_names)
-        print(len(ground_truth_names))
-        sys.exit(0)
+        comparison_nodes = randomly_select_nodes(ground_truth_names, evaluation_indications)
+        comparison_nodes = [x['id'] for x in comparison_nodes]
 
         #this is the aligned pathway filename 
         drug_disease_string = drug.replace(" ","_") + "_" + disease.replace(" ","_")
-        #TESTLINES this needs to be expanded to accomodate mulriple
-        aligned_filenames = [x for x in os.listdir(alignment_dir) if drug_disease_string in x][0]
-       
-        #grounded column is the ground truth
-        aligned_df = pd.read_table(os.path.join(alignment_dir, aligned_filenames))
-        
-        print(ground_truth_names)
-        print(ground_truth)
-        #dictionary of id to embedding vectors
         real_vectors = search_embeddings(ground_truth)
+        fake_vectors = search_embeddings(comparison_nodes)
 
-        """
-        print(ground_truth)
-        print(ground_truth_names)
-        print(aligned_df)        
-        print(real_vectors.keys())
-        """
-        num_aligned_entities = 0
-        sum_comparison_scores = 0
-        for entity, entity_type in data['entity_types'].items():
-            database = type_dict[entity_type]            
-            if database == "uniprot":
-                continue
-            entity_def = data['entity_definitions'][entity]
-            search_value = entity + ": " + entity_def
-
-            #comparison is to the aligned value
-            aligned_entity = aligned_df[aligned_df['Entities'] == entity]['Grounded'].tolist()[0]
-        
-            if str(aligned_entity).lower() != "nan":
-                #catalogging potential failure cases
-                if aligned_entity not in ground_truth_names:
-                    print("algined entity not in ground truth names")
-                    continue
-                aligned_id = ground_truth_names[aligned_entity]
-                if aligned_id not in real_vectors:
-                    print("not found in embedding", aligned_id)
-                    continue
-                gt_vector = real_vectors[aligned_id]
-                num_aligned_entities += 1
-            else:
-                gt_vector = None
-            #print("\n")
-            #print("aligned entity", aligned_entity)
-            print("entity", entity)
-            return_names, return_ids, score = search_entity(search_value, database, 20, gt_vector)
-            output_dict[entity] = {"return_names": return_names, "return_ids":return_ids, "score":score}
+        rv_name = []
+        fv_name = []
+        scores = []
+        for rv, fv in zip(real_vectors, fake_vectors):
+            rv_tmp = real_vectors[rv]
+            fv_tmp = fake_vectors[fv]
+            rv_tmp = rv_tmp.reshape(1, -1)
+            fv_tmp = fv_tmp.reshape(1, -1)
+            distance = util.calculate_distances(rv_tmp, fv_tmp)
+            rv_name.append(rv)
+            fv_name.append(fv)
+            scores.append(distance[0])
+        print(output_filename)
+        output_dict = {"ground_truth": rv_name, "randomized":fv_name, "scores":scores}
         with open(output_filename, 'w') as ofile:
             json.dump(output_dict, ofile)
 
@@ -385,12 +361,14 @@ def main():
             continue
         basename = node_names[0] + "_" + node_names[-1] + ".json"
         basename = basename.replace(" ","_")
-        output_filename = os.path.join(literature_dir, basename)
-        
-        no_wiki_pipeline.main(indication, predicate_definition_file)
+        output_filename = os.path.join(literature_dir, basename)     
+
+        drug = indication['graph']['drug']
+        disease = indication['graph']['disease']
+        no_wiki_pipeline.main(drug, disease, indication, predicate_definition_file)
         sys.exit(0)
  
 if __name__ == "__main__":
-    #main()
+    main()
     #ground_nodes()
-    negative_control()
+    #negative_control()

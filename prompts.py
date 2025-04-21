@@ -308,7 +308,7 @@ def extract_triples(paragraph, entity_1, predicates):
 def extract_entities(paragraph):
     messages = [{"role": "system", "content": """
     Task:
-    Please extract all biological and chemical entities and processes contained within the provided text, that fall into the following categories: cell types, cell substructures, receptors, proteins, drugs, genes, biological processes, macromolecular complexes, small molecules, diseases, phenotypic feature, pathway, organism taxon, molecular activity, or anatomical structure. Return them as a numbered list with no additional commentary. Please be exaughstive in returning entities within the given categories. Do not return the the same entity twice, and be specific with names as opposed to giving general categories.
+    You are a named entity recognition bot. Please extract all cell types, cell substructures, receptors, proteins, drugs, genes, biological processes, macromolecular complexes, small molecules, diseases, phenotypic feature, pathway, organism taxon, molecular activity, and anatomical structure contained within the provided text. Please also extract other biological entities. Return them as a numbered list with no additional commentary. Entities may contain overlapping words or phrases. Please be exaughstive in returning entities within the given categories. Do not return the the same entity twice.
     Example Output Format:
     1. Entity1
     2. Entity2
@@ -663,7 +663,7 @@ def alternate_ground_predicates(term1, term2, predicate, messages, category_stri
 def test_node_grounding(database, node_name):
     prompt =[
           {"role": "system", "content": "You are a helpful assistant."},
-          {"role": "user", "content": """What is the structured identifier for '%s' in the %s database? Please return ten closest identifiers as a list in the following format  with no additional commentary: ["identifier1", "identifier2", "identifier3", ...]"""%(node_name, database)}
+          {"role": "user", "content": """What is the structured identifier for '%s' in the %s database? Please return ten closest identifiers as a list in the following format  with no additional commentary: ["identifier1", "identifier2", "identifier3", ...]. If the term cannot be found within the database, please return the ten identifiers of the most closely related entities. Please retunr these as a list in the following format with no additional commentary: ["identifier1", "identifier2", "identifier3", ...]."""%(node_name, database)}
       ]
 
     completion = client.chat.completions.create(
