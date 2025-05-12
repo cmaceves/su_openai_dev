@@ -9,6 +9,24 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
+def pair_context(entity1, entity2, disease):
+    prompt =[
+          {"role": "system", "content": 
+              """You will be given two biological or chemical entities that interact, and the disease state context of this interaction. Please provide additional context about this interaction in terms of what sumbcellualr component it occurs in, what cell type it occurs in, what tissue type it occurs in, and what organ type it occurs in. Please create a json object where the keys are 'subcellular component', 'cell type', 'tissue type', and 'organ'."""},
+          {"role": "user", "content": "Entity 1:%s\nEntity 2:%s\nEntity 3:%s"%(entity1, entity2, disease)}
+      ]
+
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=prompt,
+    temperature = 0,
+    response_format={"type": "json_object" }
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+
+
 def fuzzy_nodes(entity_string):
     #given a set of biological entities, "fuzzy" them up.
     prompt =[
