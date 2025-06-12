@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import pickle
 import requests
 import random
 random.seed(42)
@@ -8,39 +9,81 @@ import numpy as np
 import openai
 from openai import OpenAI
 from dotenv import load_dotenv
-load_dotenv('.env')
+load_dotenv('/home/caceves/su_openai_dev/.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 from bs4 import BeautifulSoup
-from xml.etree import ElementTree as ET
 from joblib import Parallel, delayed
 from scipy.spatial.distance import cdist
 import prompts
-import networkx as nx
 
-def find_paths(drug, disease, triples):
-    edges = [(x[0].lower(), x[2].lower(), {"label":x[1]}) for x in triples if len(x) == 3]
-    G = nx.DiGraph()
-    G.add_edges_from(edges)
-    print(len(G.edges))
-    paths = list(nx.all_simple_paths(G, source=drug, target=disease))
-    all_strings = ""
-    for i, path in enumerate(paths):
-        tmp_string = ""
-        if i < 100:
-            print(path)
-            edge_labels = [G[path[i]][path[i + 1]]["label"] for i in range(len(path) - 1)]
-            for j in range(len(path)):
-                tmp_string += path[j]
-                if j < len(path) - 1:
-                    tmp_string += " -> "
-                if j < len(edge_labels):
-                    tmp_string += edge_labels[j] + " -> "
-            all_strings += str(i+1) + ". " + tmp_string + "\n"
-            #print(tmp_string)
-    print(all_strings)
-    sys.exit(0)
-    print(len(paths))
+def load_index_map(index_path='index_map.pkl'):
+    with open(index_path, 'rb') as f:
+        return pickle.load(f)
+
+def search_entity(search_value, n, merged_path='merged_embeddings.npy', index_path='index_map.pkl', real_vectors=None):
+    # Load merged embeddings memmap and index map
+    index_map = load_index_map(index_path)
+
+    total_rows = sum(count for _, count in index_map)
+    embedding_dim = None
+    # Get dim from first file
+    first_file = index_map[0][0]
+    arr = np.load(first_file, mmap_mode='r')
+    embedding_dim = arr.shape[1]
+
+    embeddings = np.memmap(merged_path, dtype='float32', mode='r', shape=(total_rows, embedding_dim))
+
+    # Get search embedding vector
+    embedding_1 = np.array(get_embeddings([search_value]), dtype='float32')  # shape (1, embedding_dim)
+
+    # Calculate distances all at once (you need to have a vectorized calculate_distances)
+    distances = calculate_distances(embeddings, embedding_1)  # distances shape = (total_rows,)
+
+    # Get top-n indices by smallest distance
+    top_indices = np.argpartition(distances, n)[:n]
+    top_indices = top_indices[np.argsort(distances[top_indices])]
+
+    # Build reverse lookup (index -> (file, local_idx))
+    reverse_map = []
+    for file, count in index_map:
+        reverse_map.extend([(file, i) for i in range(count)])
+
+    # Extract results with file names and local indices
+    return_names = []
+    return_ids = []
+    comparison_scores = None
+
+    for idx in top_indices:
+        file, local_idx = reverse_map[idx]
+        def_file = file.replace('embeddings', 'batch_request_formatted')  # Adjust path if needed
+        def_file = def_file.replace('.npy', '.jsonl')
+        if not os.path.isfile(def_file):
+            continue
+
+        with open(def_file, 'r') as dfile:
+            lines = dfile.readlines()
+            if local_idx >= len(lines):
+                continue
+            data = json.loads(lines[local_idx])
+            id_val = data.get('custom_id')
+            try:
+                name = data['body']['messages'][1]['content']
+            except Exception:
+                name = None
+            return_names.append(name)
+            return_ids.append(id_val)
+
+    # Optionally compare to real vectors if provided
+    if real_vectors is not None:
+        # Pick best match
+        best_idx = top_indices[0]
+        tmp = embeddings[best_idx].reshape(1, -1)
+        real_vectors = real_vectors.reshape(1, -1)
+        dist = calculate_distances(real_vectors, tmp)
+        comparison_scores = dist[0]
+
+    return return_names, return_ids, comparison_scores
 
 def pubmed_search_json(term, max_results=10):
     # Define the base URLs for E-utilities API
@@ -65,7 +108,7 @@ def pubmed_search_json(term, max_results=10):
     pmid_list = search_results["esearchresult"]["idlist"]
     if not pmid_list:
         return {}
-    
+
     counter = 0
     max_counter = 100
     increment = 100
@@ -102,7 +145,7 @@ def save_array(array, filename):
     np.save(filename, array)
 
 def load_array(filename):
-    return np.load(filename)
+    return np.load(filename, mmap_mode='r')
 
 def get_embeddings(texts, model="text-embedding-ada-002"):
     response = openai.embeddings.create(input=texts, model=model)
@@ -115,14 +158,6 @@ def calculate_distances(array, target_vector, metric='euclidean'):
     return distances.flatten()
 
 def parse_indication_paths(indication_json, n=None):
-    """
-    indication_json : string
-        The full path to the file containing the known indiciation paths.
-    n : int
-        The number of indiciations to randomly choose for evaluation.
-
-    Parses the json file containing the indications and randomly selects N for evaluation.
-    """
     with open(indication_json, 'r') as jfile:
         data = json.load(jfile)
     if n is not None:
@@ -179,7 +214,7 @@ def ingest_database():
                 all_ids.append(chebi_id)
     """
 
-    
+
 
     sys.exit(0)
     response = Parallel(n_jobs=20)(delayed(prompts.define_gpt)(value, i) for i, (value) in enumerate(all_strings))
@@ -190,7 +225,7 @@ def ingest_database():
     for resp, identifier in zip(response, all_ids):
         all_dict[identifier] = resp
 
-    vectors = try_openai_embeddings(response) 
+    vectors = try_openai_embeddings(response)
     new_vectors = np.array(vectors)
     print(new_vectors.shape)
     embedding_vectors = np.load('new_openai_embedding.npy')
@@ -205,7 +240,7 @@ def ingest_database():
 
 if __name__ == "__main__":
     #ingest_database()
-    
+
     search_term = "Clocortolone pivalate"
     search_term = "phospholipase a2 prostaglandins"
     search_term = search_term.lower()

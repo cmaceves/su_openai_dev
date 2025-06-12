@@ -9,15 +9,15 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
-def pair_context(entity1, entity2, disease):
+def pair_context(entity1, entity2, disease, drug):
     prompt =[
           {"role": "system", "content": 
-              """You will be given two biological or chemical entities that interact, and the disease state context of this interaction. Please provide additional context about this interaction in terms of what sumbcellualr component it occurs in, what cell type it occurs in, what tissue type it occurs in, and what organ type it occurs in. Please create a json object where the keys are 'subcellular component', 'cell type', 'tissue type', and 'organ'."""},
-          {"role": "user", "content": "Entity 1:%s\nEntity 2:%s\nEntity 3:%s"%(entity1, entity2, disease)}
+              """You will be given two biological or chemical entities that interact in the mechanism of action of a drug, and the disease state being treated by this interaction. Please provide additional context about these two proteins in terms of what subcellular components they co-localize in, what cell types they co-localize in, what tissue types they co-localize in, and what organs type they co-localize in. Please create a json object where the keys are 'subcellular components', 'cell types', 'tissue types', and 'organs'. If these two entities do no co-localize of no information can be found about a co-localize in a category, please set the value of that category to 'None'. If these two entities do not interact within this disease state, please set all values to 'None'."""},
+          {"role": "user", "content": "Entity 1:%s\nEntity 2:%s\nEntity 3:%s\nDrug: %s"%(entity1, entity2, disease, drug)}
       ]
 
     completion = client.chat.completions.create(
-    model="gpt-3.5-turbo",
+    model="gpt-4o",
     messages=prompt,
     temperature = 0,
     response_format={"type": "json_object" }

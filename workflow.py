@@ -4,26 +4,12 @@ import sys
 import json
 import requests
 
-import itertools
 from itertools import combinations
-from joblib import Parallel, delayed
-from sklearn.metrics.pairwise import cosine_similarity
 import prompts
 import util
-import wiki_pipeline
 import numpy as np
-
-import networkx as nx
 import matplotlib.pyplot as plt
 
-name_lookup_url = "https://name-lookup.transltr.io/lookup"
-node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="
-go_types = ["Biological Process", "Cellular Component", "Molecular Activity"]
-react_types = ["Pathway"]
-mesh_types = ["Chemical Substance", "Disease", "Drug"]
-chebi_types = ["Chemical Substance"]
-uniprot_types = ["Protein"]
-hp_types = ['Phenotypic Feature']
 node_types = ['Biological Process', 'Cell', 'Cellular Component', 'Chemical Substance', 'Disease', 'Drug', 'Gene Family', "Gross Anatomical Structure", "Macromolecular Structure", "Molecular Activity", "Organism Taxon", "Pathway", "Phenotypic Feature", "Protein"]
 
 
@@ -65,74 +51,6 @@ def ground_predicates(triples, predicates):
         print(resp)
         sys.exit(0)
 
-def ground_node_types(unique_nodes, record_category_def, category_string):
-    grounded_types = {}
-    category_messages = []
-    values = []
-    for k, v in record_category_def.items():
-        category_messages.extend(v)
-        values.append(k)
-    for node in unique_nodes:
-        resp, prompt = prompts.alternate_categorize_node(node, category_messages, category_string)
-        index = int(resp)
-        grounded_types[node] = values[index]
-    return(grounded_types)
-
-def ground_node_terms(expanded_nodes):
-    """
-    Ground the node terms against known databases.
-    """
-    grounded_nodes = {}
-    synonym_pages_dict = {}
-    pooled_synonyms = []
-    
-    for entity, synonym_list in expanded_nodes.items():
-        pooled_synonyms.extend(synonym_list)
-
-    synonym_pages = Parallel(n_jobs=10)(delayed(wiki_pipeline.matched_wikipedia_pages)(synonym) for synonym in pooled_synonyms)
-    tmp_dict = {}
-    for synonym_search in synonym_pages:
-        if len(synonym_search['pages']) > 0:
-            tmp_dict[synonym_search['entity']] = synonym_search['pages']
-    for entity, synonym_list in expanded_nodes.items():
-        synonym_pages_dict[entity] = []
-        for key, value in tmp_dict.items():
-            if key in synonym_list:
-                if entity not in synonym_pages_dict:
-                    synonym_pages_dict[entity] = []
-                synonym_pages_dict[entity].extend(value)
-    synonym_groundings = {}
-    for key, value in synonym_pages_dict.items():
-        if key not in synonym_groundings:
-            synonym_groundings[key] = {}
-        for entity in value:
-            if entity in synonym_groundings[key]:
-                continue
-            mesh_id, uniprot, mondo, hpo, go = wiki_pipeline.ground_synonym(entity)
-            synonym_groundings[key][entity] = [mesh_id, uniprot, mondo, hpo, go]
-    """
-    for key, value in synonym_groundings.items():
-        if len(value) == 0:
-            param  = {"string": key}
-            resp = requests.post(name_lookup_url, params=param)
-            all_matches = resp.json()
-            label_string = ""
-            for i, match in enumerate(all_matches):
-                label_string += str(i+1) + "." + match['label'].lower() + "\n"
-            resp, prompt = prompts.additional_grounding(label_string, key)
-            try:
-                index_resp = int(resp) - 1
-            except:
-                print("fail here")
-                continue
-            grounded_label = all_matches[index_resp]['curie']
-            synonym_groundings[key][key] = [grounded_label]
-    """
-    for key, value in synonym_groundings.items():
-        if len(value) == 0:
-            pass
-    return(synonym_groundings)
-
 def alternate_mechanism_one_shot(term1, term2, predicate_data):
     """
     Get the mechanism without providing ChatGPT with additional data.
@@ -153,15 +71,12 @@ def alternate_mechanism_one_shot(term1, term2, predicate_data):
     return(all_triples)
 
 def main(drug, disease, indication, predicate_json):
-    entity_json = "./predicates/entities.json"
-    literature_dir = "./no_follow"
+    literature_dir = "./output"
     category_definitions = "./predicates/category_definitions.json"
     name_lookup_url = "https://name-lookup.transltr.io/lookup"
 
     with open(category_definitions, "r") as cfile:
         record_category_def = json.load(cfile)
-    with open(entity_json, "r") as jfile:
-        entity_data = json.load(jfile)
     with open(predicate_json, "r") as jfile:
         predicate_data = json.load(jfile)
 
@@ -178,7 +93,7 @@ def main(drug, disease, indication, predicate_json):
         category_string += str(i) + "." + t + "\n"
         categories.append(t)
 
-    basename = drug + "_" + disease + ".json"
+    basename = drug.lower() + "_" + disease.lower() + ".json"
     basename = basename.replace(" ","_")
     output_filename = os.path.join(literature_dir, basename)
     #given the new list of entities, generate a mechanism of action paragraph description
