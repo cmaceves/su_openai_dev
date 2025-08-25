@@ -8,59 +8,135 @@ random.seed(42)
 import numpy as np
 import openai
 from openai import OpenAI
+from line_profiler import LineProfiler
 from dotenv import load_dotenv
 load_dotenv('/home/caceves/su_openai_dev/.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
-from bs4 import BeautifulSoup
 from joblib import Parallel, delayed
 from scipy.spatial.distance import cdist
 import prompts
+from numba import njit, prange
 
-def load_index_map(index_path='index_map.pkl'):
+def normalize_node(term, n=1):
+    node_norm_url = "https://nodenorm.transltr.io/get_normalized_nodes?curie="
+    resp = requests.get(node_norm_url+term)
+    #print(node_norm_url+term)
+    resp = resp.json()
+    if term in resp:
+        if resp[term] is None:
+            return([])
+        eq_id = [x['identifier'] for x in resp[term]['equivalent_identifiers']]
+        return(eq_id)
+    else:
+        return([])
+
+@njit(parallel=True, fastmath=True)
+def cosine_distances_numba(embeddings, queries):
+    """
+    Compute cosine distances between all queries and all embeddings.
+
+    Parameters
+    ----------
+    embeddings : np.ndarray of shape (N, D)
+        Matrix of N embedding vectors of dimension D.
+    queries : np.ndarray of shape (M, D)
+        Matrix of M query vectors of dimension D.
+
+    Returns
+    -------
+    distances : np.ndarray of shape (M, N)
+        Cosine distances (1 - cosine similarity).
+    """
+    N, D = embeddings.shape
+    M = queries.shape[0]
+    distances = np.empty((M, N), dtype=np.float32)
+
+    # precompute norms
+    emb_norms = np.empty(N, dtype=np.float32)
+    for i in prange(N):
+        s = 0.0
+        for d in range(D):
+            s += embeddings[i, d] * embeddings[i, d]
+        emb_norms[i] = np.sqrt(s)
+
+    query_norms = np.empty(M, dtype=np.float32)
+    for j in prange(M):
+        s = 0.0
+        for d in range(D):
+            s += queries[j, d] * queries[j, d]
+        query_norms[j] = np.sqrt(s)
+
+    # compute cosine distances
+    for j in prange(M):
+        for i in range(N):
+            dot = 0.0
+            for d in range(D):
+                dot += queries[j, d] * embeddings[i, d]
+            sim = dot / (query_norms[j] * emb_norms[i] + 1e-9)
+            distances[j, i] = 1.0 - sim
+
+    return distances
+
+def load_index_map(index_path='/home/caceves/su_openai_dev/index_map.pkl'):
     with open(index_path, 'rb') as f:
         return pickle.load(f)
 
-def search_entity(search_value, n, merged_path='merged_embeddings.npy', index_path='index_map.pkl', real_vectors=None):
-    # Load merged embeddings memmap and index map
-    index_map = load_index_map(index_path)
+def cosine_distances_chunked(embeddings, query_vector, chunk_size=700000):
+    """
+    Compute cosine distances between embeddings and query_vector in chunks.
+    embeddings: memmap or ndarray (N, D)
+    query_vector: ndarray (1, D)
+    """
+    n = embeddings.shape[0]
+    distances = np.empty(n, dtype=np.float32)
+    q_norm_val = np.linalg.norm(query_vector)
 
-    total_rows = sum(count for _, count in index_map)
-    embedding_dim = None
-    # Get dim from first file
-    first_file = index_map[0][0]
-    arr = np.load(first_file, mmap_mode='r')
-    embedding_dim = arr.shape[1]
+    for start in range(0, n, chunk_size):
+        end = min(start + chunk_size, n)
+        chunk = embeddings[start:end]
+        chunk_norms = np.sqrt(np.einsum('ij,ij->i', chunk, chunk))
+        dot_products = np.dot(chunk, query_vector.T).squeeze()
+        similarities = dot_products / (chunk_norms * q_norm_val)
+        distances[start:end] = 1 - similarities
+    return distances
+
+def search_entity(search_value, n, merged_path='/home/caceves/su_openai_dev/merged_embeddings.npy', index_path='/home/caceves/su_openai_dev/index_map.pkl', real_vectors=None, reverse_map=None, embedding_dim=None, total_rows=None):
+    # Load merged embeddings memmap and index map
+    if reverse_map is None:
+        index_map = load_index_map(index_path)
+        reverse_map = []
+        for file, count in index_map:
+            reverse_map.extend([(file, i) for i in range(count)])
+        total_rows = sum(count for _, count in index_map)
+    if embedding_dim is None:
+        first_file = index_map[0][0]
+        arr = np.load(first_file, mmap_mode='r')
+        embedding_dim = arr.shape[1]
 
     embeddings = np.memmap(merged_path, dtype='float32', mode='r', shape=(total_rows, embedding_dim))
-
-    # Get search embedding vector
     embedding_1 = np.array(get_embeddings([search_value]), dtype='float32')  # shape (1, embedding_dim)
-
-    # Calculate distances all at once (you need to have a vectorized calculate_distances)
-    distances = calculate_distances(embeddings, embedding_1)  # distances shape = (total_rows,)
+    distances = cosine_distances_numba(embeddings, embedding_1)
+    distances = distances.ravel()
 
     # Get top-n indices by smallest distance
     top_indices = np.argpartition(distances, n)[:n]
     top_indices = top_indices[np.argsort(distances[top_indices])]
-
-    # Build reverse lookup (index -> (file, local_idx))
-    reverse_map = []
-    for file, count in index_map:
-        reverse_map.extend([(file, i) for i in range(count)])
-
+    #distances = cosine_distances_chunked(embeddings, embedding_1)
+    # Get top-n indices by smallest distance
+    #top_indices = np.argpartition(distances, n)[:n]
+    #top_indices = top_indices[np.argsort(distances[top_indices])]
     # Extract results with file names and local indices
     return_names = []
     return_ids = []
     comparison_scores = None
-
     for idx in top_indices:
         file, local_idx = reverse_map[idx]
-        def_file = file.replace('embeddings', 'batch_request_formatted')  # Adjust path if needed
+        def_file = file.replace("/openai_","/").replace("_embeddings","")
+        def_file = def_file.replace('embeddings', 'batch_request_formatted')  # Adjust path if needed
         def_file = def_file.replace('.npy', '.jsonl')
         if not os.path.isfile(def_file):
             continue
-
         with open(def_file, 'r') as dfile:
             lines = dfile.readlines()
             if local_idx >= len(lines):
@@ -73,7 +149,6 @@ def search_entity(search_value, n, merged_path='merged_embeddings.npy', index_pa
                 name = None
             return_names.append(name)
             return_ids.append(id_val)
-
     # Optionally compare to real vectors if provided
     if real_vectors is not None:
         # Pick best match
@@ -83,63 +158,9 @@ def search_entity(search_value, n, merged_path='merged_embeddings.npy', index_pa
         dist = calculate_distances(real_vectors, tmp)
         comparison_scores = dist[0]
 
-    return return_names, return_ids, comparison_scores
+    top_embedding = embeddings[top_indices[0]].copy()
 
-def pubmed_search_json(term, max_results=10):
-    # Define the base URLs for E-utilities API
-    base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
-    search_url = base_url + "esearch.fcgi"
-    fetch_url = base_url + "efetch.fcgi"
-
-    # Step 1: Search for PubMed articles based on the search term
-    max_results = 3000
-    search_params = {
-        "db": "pubmed",
-        "term": term + " AND humans[MeSH Terms]",
-        "retmax": max_results,  # Limit the number of results
-        "retmode": "json"       # Return results in JSON format
-    }
-    search_response = requests.get(search_url, params=search_params)
-    search_results = search_response.json()
-    if len(search_results) == 0:
-        return {}
-
-    # Get the list of PubMed IDs (PMIDs)
-    pmid_list = search_results["esearchresult"]["idlist"]
-    if not pmid_list:
-        return {}
-
-    counter = 0
-    max_counter = 100
-    increment = 100
-    all_titles = []
-    while max_counter <= 500:
-        pmid_list_tmp = pmid_list[counter:max_counter]
-        counter += increment
-        max_counter += increment
-        # Step 2: Fetch abstracts for each PMID
-        fetch_params = {
-            "db": "pubmed",
-            "id": ",".join(pmid_list_tmp),  # Join PMIDs as a comma-separated string
-            "retmode": "xml",          # Fetch results in JSON format
-            "rettype": "abstract"
-        }
-        fetch_response = requests.get(fetch_url, params=fetch_params)
-        soup = BeautifulSoup(fetch_response.content, "xml")
-        abstracts = {}
-        titles = []
-        for article in soup.find_all("PubmedArticle"):
-            pmid = article.find("PMID").text
-            abstract_text = ""
-            titles.append(article.find("ArticleTitle").text)
-            # Find all AbstractText sections and handle HTML tags within
-            #for abstract_section in article.find_all("AbstractText"):
-            #    abstract_text += abstract_section.get_text(" ", strip=True) + " "  # Join text with spaces
-
-            # Store the cleaned abstract text by PMID
-            #abstracts[pmid] = abstract_text.strip()
-        all_titles.append(titles)
-    return(abstracts, all_titles)
+    return return_names, return_ids, comparison_scores, top_embedding
 
 def save_array(array, filename):
     np.save(filename, array)
@@ -239,16 +260,4 @@ def ingest_database():
         json.dump(all_dict, jfile)
 
 if __name__ == "__main__":
-    #ingest_database()
-
-    search_term = "Clocortolone pivalate"
-    search_term = "phospholipase a2 prostaglandins"
-    search_term = search_term.lower()
-    print(search_term)
-    abstracts = pubmed_search_json(search_term, max_results=10)
-    for key, value in abstracts.items():
-        entities, resp = prompts.extract_entities(value)
-        print(key)
-        print(entities)
-        print("\n")
-
+    main()

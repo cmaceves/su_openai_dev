@@ -7,6 +7,7 @@ import csv
 import sys
 import json
 import libsbml #parse sbml file format
+import pandas as pd
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 go_db = "/home/caceves/su_openai_dev/databases/go_definitions.txt"
@@ -40,10 +41,10 @@ def process_record(record):
                 if print_status:
                     print(tmp)
                 output_dictionary['name'] = tmp
-        if line.startswith("AC   "):           
+        if line.startswith("AC   "):
             if found_id:
                 continue
-            tmp = line.split("   ")[1].split(";")[0] 
+            tmp = line.split("   ")[1].split(";")[0]
             if print_status:
                 print(tmp)
             output_dictionary["accession"] = tmp
@@ -93,7 +94,7 @@ def process_uniprot():
                 record = []
             else:
                 record.append(line)
-    print(len(all_records)) 
+    print(len(all_records))
     with open(os.path.join(output_dir, "uniprot_definitions.json"), "w") as jfile:
         json.dump(all_records, jfile)
 
@@ -140,7 +141,7 @@ def process_hp():
                 description = ""
             output_dict['accession'] = id_val
             output_dict['name'] = label
-            output_dict['function'] = description                      
+            output_dict['function'] = description
             all_records.append(output_dict)
 
     with open(os.path.join(output_dir, "hp_definitions.json"), "w") as jfile:
@@ -165,7 +166,7 @@ def process_mesh():
         output_dict['name'] = mesh_name
         output_dict['description'] = description
         all_records.append(output_dict)
-    
+
     with open(os.path.join(output_dir, "mesh_definitions.json"), "w") as jfile:
         json.dump(all_records, jfile)
 
@@ -174,7 +175,7 @@ def process_uberon():
     tree = ET.parse(uberon_db)
     root = tree.getroot()
     all_records = []
-    
+
     ns = {'owl': 'http://www.w3.org/2002/07/owl#', 'rdfs': 'http://www.w3.org/2000/01/rdf-schema#', 'obo': 'http://purl.obolibrary.org/obo/'}
 
     for prefix, uri in ns.items():
@@ -183,15 +184,15 @@ def process_uberon():
 
     for term in root.findall(".//{http://www.w3.org/2002/07/owl#}Class"):
         term_id = term.get("{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about")
-        
+
         if term_id and "UBERON_" in term_id:
             uberon_id = "UBERON:" + term_id.split("_")[-1]  # Convert URI to UBERON:XXXXXX format
-            
+
             label_elem = term.find("{http://www.w3.org/2000/01/rdf-schema#}label")
             name = label_elem.text if label_elem is not None else ""
-            
+
             definition_elem = term.find("{http://purl.obolibrary.org/obo/}IAO_0000115")
-            description = definition_elem.text if definition_elem is not None else "" 
+            description = definition_elem.text if definition_elem is not None else ""
             all_records.append({"accession": uberon_id, "name": name, "description": description})
 
     with open(os.path.join(output_dir, "uberon_definitions.json"), "w") as jfile:
@@ -209,7 +210,7 @@ def process_ncbitaxon():
             tax_id = row[0].strip()  # Taxon ID
             name = row[1].strip()  # Scientific or common name
             name_type = row[3].strip()  # Type of name
-            
+
             if tax_id not in all_records:
                 output_dict = {"accession": tax_id, "name": "", "description": ""}
                 all_records[tax_id] = output_dict
@@ -257,21 +258,21 @@ def process_cell_ontology():
 
     for term in root.findall(".//{http://www.w3.org/2002/07/owl#}Class"):
         term_id = term.get("{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about")
-        
+
         if term_id and "CL_" in term_id:
             accession = "CL:" + term_id.split("_")[-1]  # Convert URI to UBERON:XXXXXX format
-            
+
             label_elem = term.find("{http://www.w3.org/2000/01/rdf-schema#}label")
             name = label_elem.text if label_elem is not None else ""
-            
+
             definition_elem = term.find("{http://purl.obolibrary.org/obo/}IAO_0000115")
-            description = definition_elem.text if definition_elem is not None else "" 
+            description = definition_elem.text if definition_elem is not None else ""
             #print(name, description)
 
             output_dict = {"accession": accession, "name": name, "description": description}
             #print(output_dict)
             all_records.append(output_dict)
-    
+
     with open(os.path.join(output_dir, "cell_ontology_definitions.json"), "w") as jfile:
         json.dump(all_records, jfile)
 
@@ -282,21 +283,21 @@ def process_reactome():
     for filename in all_pathway_files:
         document = libsbml.readSBML(filename)
         model = document.getModel()
-        
+
         id_val = os.path.basename(filename).replace(".sbml","")
         name = model.getName()
 
         notes_html = model.getNotesString()
         soup = BeautifulSoup(notes_html, "xml")
-        paragraph_text = soup.get_text().strip()  
-        
+        paragraph_text = soup.get_text().strip()
+
         output_dict = {}
         output_dict['accession'] = id_val
         output_dict['name'] = name
         output_dict['description'] = paragraph_text
 
         all_records.append(output_dict)
-    
+
     with open(os.path.join(output_dir, "reactome_definitions.json"), "w") as jfile:
         json.dump(all_records, jfile)
 
@@ -321,15 +322,15 @@ def process_pr():
 
             label_elem = term.find("{http://www.w3.org/2000/01/rdf-schema#}label")
             name = label_elem.text if label_elem is not None else ""
-            
+
             definition_elem = term.find("{http://purl.obolibrary.org/obo/}IAO_0000115")
-            description = definition_elem.text if definition_elem is not None else "" 
+            description = definition_elem.text if definition_elem is not None else ""
 
             #print(accession, name, description)
             output_dict = {"accession": accession, "name": name, "description": description}
             print(output_dict)
             all_records.append(output_dict)
-    
+
     with open(os.path.join(output_dir, "pr_definitions.json"), "w") as jfile:
         json.dump(all_records, jfile)
 
@@ -350,7 +351,7 @@ def process_interpro():
             description = re.sub(r"\[[^\[\]]*\]", "", description).strip()
         else:
             description = ""
-       
+
         output_dict = {}
         output_dict['accession'] = accession
         output_dict['name'] = name
@@ -362,18 +363,25 @@ def process_interpro():
 
 
 def process_chebi():
-    filename = "/home/caceves/su_openai_dev/databases/ChEBI_complete_3star.sdf"
-    suppl = Chem.SDMolSupplier(filename)
-    for mol in suppl:
-        if mol is None:
-            continue
+    filename = "/home/caceves/su_openai_dev/databases/names_3star.tsv"
+    df = pd.read_csv(filename, sep="\t", dtype=str)
+    all_records = []
 
-        chebi_id = mol.GetProp("ChEBI ID") if mol.HasProp("ChEBI ID") else "N/A"
-        name = mol.GetProp("ChEBI Name") if mol.HasProp("ChEBI Name") else "N/A"
-        description = mol.GetProp("Definition") if mol.HasProp("Definition") else "N/A"
+    for index, row in df.iterrows():
+        output_dict = {}
+        accession = row['ID']
+        name = row['NAME']
 
-        print(chebi_id, name, description)
-        sys.exit(0)
+        output_dict['accession'] = accession
+        output_dict['name'] = name
+        output_dict['description'] = ""
+
+        all_records.append(output_dict)
+
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, "chebi_definitions.json")
+    with open(output_file, "w") as jfile:
+        json.dump(all_records, jfile)
 
 def stats_master_db():
     filepath = "/home/caceves/su_openai_dev/parsed_databases"
@@ -383,9 +391,9 @@ def stats_master_db():
         with open(filename, 'r') as jfile:
             data = json.load(jfile)
         print(filename, len(data))
-        
+
 if __name__ == "__main__":
-    process_uniprot()
+    #process_uniprot()
     #process_go()
 
     #process_hp()
@@ -396,7 +404,6 @@ if __name__ == "__main__":
     #process_reactome()
     #process_pr()
     #process_interpro()
-    #process_chebi()
-    
+    process_chebi()
     #stats_master_db()
 

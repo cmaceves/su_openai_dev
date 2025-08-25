@@ -19,53 +19,69 @@ def select_random_node(ground_truth_ids, all_indications, n=1):
     add_nodes = random.sample(filtered_indications, n)
     return(add_nodes)
 
+
 def main():
-    filename = "./output/lovastatin_hyperlipidemia.json"
-    input_dir = "./output"
+    input_dir = "./output2"
     indication_json = "indication_paths.json"
-    output_dir = "benchmark_dtw"
+    output_dir = "dtw_metrics"
     all_indications = util.parse_indication_paths(indication_json)
+
+    index_path='/home/caceves/su_openai_dev/index_map.pkl'
+    index_map = util.load_index_map(index_path)
+    total_rows = sum(count for _, count in index_map)
+    reverse_map = []
+    for file, count in index_map:
+        reverse_map.extend([(file, i) for i in range(count)])
+    first_file = index_map[0][0]
+    arr = np.load(first_file, mmap_mode='r')
+    embedding_dim = arr.shape[1]
 
     all_files = [os.path.join(input_dir, x) for x in os.listdir(input_dir)]
     for filename in all_files:
+        output_filename = os.path.join(output_dir, os.path.basename(filename))
+        if os.path.isfile(output_filename):
+            continue
         with open(filename, 'r') as rfile:
             data = json.load(rfile)
 
-        output_filename = os.path.join(output_dir, os.path.basename(filename))
         output_values = []
-
-        all_pathways = [x for x in data['graph'].split("\n") if x != ""]
+        all_pathways = data['pathways']
         indication = data['indication']
         ground_truth_nodes = [x['name'] for x in indication['nodes']]
         ground_truth_ids = [x['id'] for x in indication['nodes']]
         ground_truth_vectors = []
-
         add_nodes = select_random_node(ground_truth_ids, all_indications, 3)
         for node, id in zip(ground_truth_nodes, ground_truth_ids):
-            resp = prompts.define_database_term(node)
-            return_names, return_ids, comparison_scores, top_embedding = util.search_entity(resp, 10)
+            resp, prompt = prompts.define_entity(node, "gpt-4.1")
+            return_names, return_ids, comparison_scores, top_embedding = util.search_entity(resp, 10, reverse_map=reverse_map, embedding_dim=embedding_dim, total_rows=total_rows)
             ground_truth_vectors.append(top_embedding)
-
+        print("got gt")
         #for our random nodes, fetch the ground truth vector
         random_node_vectors = []
         for node in add_nodes:
-            resp = prompts.define_database_term(node['name'])
-            return_names, return_ids, comparison_scores, top_embedding = util.search_entity(resp, 10)
+            resp, prompt = prompts.define_entity(node['name'], "gpt-4.1")
+            return_names, return_ids, comparison_scores, top_embedding = util.search_entity(resp, 10, reverse_map=reverse_map, embedding_dim=embedding_dim, total_rows=total_rows)
             random_node_vectors.append(top_embedding)
-
+        print("got add node")
         for pathway in all_pathways:
             tmp = {}
             print(pathway)
+            predicted_vectors = [ground_truth_vectors[0]]
             graph_1_list = pathway.split(" -> ")
             graph_1_entities = graph_1_list[::2]
-            predicted_vectors = []
+            if len(graph_1_entities) <= 3:
+                continue
             for node in graph_1_entities:
-                resp = prompts.define_database_term(node)
-                return_names, return_ids, comparison_scores, top_embedding = util.search_entity(resp, 10)
-                predicted_vectors.append(top_embedding)
-
+                if node in data['grounding']:
+                    top_embedding = data['grounding'][node]['embedding']
+                    predicted_vectors.append(top_embedding)
+            predicted_vectors.append(ground_truth_vectors[-1])
+            if len(predicted_vectors) != len(graph_1_entities):
+                print("not same length")
+                continue
             P = np.array(predicted_vectors)
             G = np.array(ground_truth_vectors)
+
             position = random.randint(1, len(predicted_vectors) - 2)
             SP1_path = copy.deepcopy(graph_1_entities)
             SP1_path.insert(position, add_nodes[0]['name'])
@@ -75,7 +91,6 @@ def main():
 
             SP3 = copy.deepcopy(predicted_vectors)
             SP3_path = copy.deepcopy(graph_1_entities)
-            print(len(predicted_vectors))
 
             if len(predicted_vectors) <= 4:
                 positions = random.choices(range(1, len(predicted_vectors) - 1), k=3)

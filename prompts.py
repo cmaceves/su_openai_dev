@@ -9,6 +9,25 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
+def one_shot(disease, drug, model, predicates):
+    prompt =[
+          {"role": "system", "content":
+        """You will be given a drug and the disease it treats. Please do the following, and return the results of each step: 1. Describe the mechanism of action through which the drug treats the disease in paragraph form. 2. Perform named entity recognition and return a Pythonic list of all the biological and chemical entities. Be as comprehensive as possible. 3. Create up to five directed pathways which describe the mechanism of action by which the drug treats the disease using the named entities and the provided list of edge descriptors. Every pathway must start with the drug and end with the disease. Pathways can contain between two and ten entities and should be as descriptive and detailed as possible. Descriptors describe the relationships between adjacent edges. Descriptors must be chosen from the provided list. Entities may only appear once per pathway.
+
+The results should be in the following json format with no additional commentary or formatting.
+{"paragraph": "text here",
+"entities": ["entity1", "entity2", "entity3", "entity4", "entity5", "entity6", "entity7", "entity8", "entity9", "entity10"],
+"pathways":  ["drug -> descriptor1 -> entity1 -> descriptor30 -> disease",  "drug -> descriptor13 -> entity2 -> descriptor45 -> entity3 -> descriptor15 ->disease", "drug -> descriptor3 -> entity8 -> descriptor3 -> entity10 -> descriptor21 -> entity4 -> descriptor12 -> entity3 -> descriptor5 -> entity7 -> descriptor33 -> disease"]
+}"""},
+          {"role": "user", "content": "Disease:%s\nDrug: %s\nEdge Descriptors:%s"%(disease, drug, predicates)}]
+    completion = client.chat.completions.create(
+    model="%s"%model,
+    messages=prompt,
+    response_format={"type": "json_object" }
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
 def pair_context(entity1, entity2, disease, drug):
     prompt =[
           {"role": "system", "content":
@@ -21,6 +40,20 @@ def pair_context(entity1, entity2, disease, drug):
     messages=prompt,
     temperature = 0,
     response_format={"type": "json_object" }
+    )
+    response = str(completion.choices[0].message.content)
+    return(response, prompt)
+
+def define_entity(node, model):
+    prompt =[
+          {"role": "system", "content":
+           """Given a biochemical entity describe it and define it's function in under 150 tokens"""},
+          {"role": "user", "content": "%s"%(node)}
+      ]
+
+    completion = client.chat.completions.create(
+    model=model,
+    messages=prompt,
     )
     response = str(completion.choices[0].message.content)
     return(response, prompt)
@@ -142,15 +175,6 @@ No nodes may be repeated more than once within a knowledge graph, the drug and d
     response = str(completion.choices[0].message.content)
     return(response)
 
-
-def define_database_term(term):
-    messages = [{"role": "system", "content":
-    """Given a biochemical entity describe it and define it's function in under 150 tokens"""},
-    {"role":"user", "content":"%s"%(term)}]
-
-    completion = client.chat.completions.create(model="gpt-3.5-turbo", messages=messages, temperature=0, max_tokens=200)
-    response = str(completion.choices[0].message.content)
-    return(response)
 
 def find_correct_identifier(node, synonym_string):
     messages = [{"role": "system", "content":

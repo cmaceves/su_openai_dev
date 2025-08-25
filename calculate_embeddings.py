@@ -6,7 +6,8 @@ import sys
 import json
 import requests
 import numpy as np
-from testing_grounding_strategies import save_array, create_batches, get_embeddings
+from util import save_array, get_embeddings
+from testing_grounding_strategies import create_batches
 import openai
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -17,13 +18,11 @@ client = OpenAI()
 
 
 def process_embedding(prefix, output_dir):
-    formatting_dir = "/home/caceves/su_openai_dev/embedding_request_formatted"
+    formatting_dir = "/home/caceves/su_openai_dev/embedding_request_formatted_5"
     original_parsed_data = "/home/caceves/su_openai_dev/parsed_databases/%s_definitions.json"
 
     #should already be in <50k chunks
     definition_filename = os.path.join(output_dir, prefix+"_results.json")
-    print("need to include original definition")
-    sys.exit(0)
     text_definitions = []
     custom_ids = []
     with open(definition_filename, "r") as dfile:
@@ -55,9 +54,7 @@ def batch_request_formatting(prefix, database_name, output_prefix, system_prompt
         data = json.load(dfile)
     for i, record in enumerate(data):
         if not description:
-            request = {"custom_id": "%s"%record['accession'], "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-3.5-turbo", "messages": [{"role": "system", "content": "%s"%system_prompt},{"role": "user", "content": "%s"%record['name']}],"max_tokens": 200, "temperature":0}}
-        else:
-            request = {"custom_id": "UNIPROT:%s"%record['accession'], "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-3.5-turbo", "messages": [{"role": "system", "content": "%s"%system_prompt},{"role": "user", "content": "%s - %s"%(record['name'], record['description'])}],"max_tokens": 200, "temperature":0}}
+            request = {"custom_id": "%s"%record['accession'], "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-4.1", "messages": [{"role": "system", "content": "%s"%system_prompt},{"role": "user", "content": "%s"%record['name']}],"max_tokens": 200, "temperature":0}}
         requests.append(request)
     counter = 1
     tmp = []
@@ -69,13 +66,12 @@ def batch_request_formatting(prefix, database_name, output_prefix, system_prompt
             counter += 1
             tmp = []
         tmp.append(item)
-
     #clean up anything that hasn't been written
     if len(tmp) > 0:
         with open(os.path.join(output_prefix, "%s_%s.jsonl"%(prefix, counter)), "w") as jsonl_file:
             for value in tmp:
                 jsonl_file.write(json.dumps(value) + "\n")
-   
+
 
 def upload_embedding_batch(filename, prefix, output_dir):
     """
@@ -87,7 +83,7 @@ def upload_embedding_batch(filename, prefix, output_dir):
     #create batch
     batch_input_file_id = batch_input_file.id
     request_val = client.batches.create(input_file_id=batch_input_file_id, endpoint="/v1/embeddings", completion_window="24h", metadata={"description": "%s"%prefix})
-   
+
     output_dict = {"batch_input_file_id":request_val.input_file_id, "batch_output_file_id": "", "id":request_val.id, "status":"", "error_file_id":""}
 
     #write important information to a file
@@ -106,7 +102,7 @@ def upload_batch(filename, prefix, output_dir):
     #create batch
     batch_input_file_id = batch_input_file.id
     request_val = client.batches.create(input_file_id=batch_input_file_id, endpoint="/v1/chat/completions", completion_window="24h", metadata={"description": "%s"%prefix})
-   
+
     output_dict = {"batch_input_file_id":request_val.input_file_id, "batch_output_file_id": "", "id":request_val.id, "status":"", "error_file_id":""}
 
     #write important information to a file
@@ -129,15 +125,15 @@ def check_batch_status(basename, output_dir):
         data['batch_input_file_id'] = batch.input_file_id
         with open(filename, 'w') as ffile:
             json.dump(data, ffile)
-    
+
 def retrieve_batch(basename, output_dir):
     filename = os.path.join(output_dir, basename+"_params.txt")
     output_filename = os.path.join(output_dir, basename+"_results.json")
 
     #we have already retrieved this file
-    if os.path.isfile(output_filename):
-        return
-    
+    #if os.path.isfile(output_filename):
+    #    return
+
     with open(filename, "r") as ffile:
         data = json.load(ffile)
     output_file_id = data['batch_output_file_id']
@@ -153,32 +149,31 @@ def main():
     upload = False
     check = False
 
-    embeddings = False
-    embeddings_check = True
+    embeddings = True
+    embeddings_check = False
 
     #this will yield however many batches are present in the database
-    database_name = "uniprot"
-    output_dir = "/home/caceves/su_openai_dev/batch_request_outputs"
+    database_name = "chebi"
+    output_dir = "/home/caceves/su_openai_dev/batch_request_outputs_5"
 
     if upload:
         database_full = "/home/caceves/su_openai_dev/parsed_databases/%s_definitions.json"%database_name
-        output_prefix = "/home/caceves/su_openai_dev/batch_request_formatted"
+        output_prefix = "/home/caceves/su_openai_dev/batch_request_formatted_5"
         system_prompt = "Given a biochemical entity describe it and define it's function in under 150 tokens"
-        
-        batch_request_formatting(database_name, database_full, output_prefix, system_prompt)
 
+        batch_request_formatting(database_name, database_full, output_prefix, system_prompt)
         #get all batches for this database
-        format_dir = "/home/caceves/su_openai_dev/batch_request_formatted"
+        format_dir = "/home/caceves/su_openai_dev/batch_request_formatted_5"
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
         #upload the batches
-        for batch in all_batches:
+        for i, batch in enumerate(all_batches):
             basename = os.path.basename(batch).replace(".jsonl", "")
             upload_batch(batch, basename, output_dir)
-    
+
     #check the batch status and if it's complete retrieve it
     if check:
         #get all batches for this database
-        format_dir = "/home/caceves/su_openai_dev/batch_request_formatted"
+        format_dir = "/home/caceves/su_openai_dev/batch_request_formatted_5"
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
         for batch in all_batches:
             basename = os.path.basename(batch).replace(".jsonl", "")
@@ -187,7 +182,7 @@ def main():
 
     if embeddings:
         #here we grab the actual embedding vector
-        format_dir = "/home/caceves/su_openai_dev/batch_request_formatted"
+        format_dir = "/home/caceves/su_openai_dev/batch_request_formatted_5"
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
 
         for batch in all_batches:
@@ -200,11 +195,11 @@ def main():
                 continue
 
             process_embedding(basename, output_dir)
-            filename = os.path.join("/home/caceves/su_openai_dev/embedding_request_formatted", basename+"_embedding.jsonl")
+            filename = os.path.join("/home/caceves/su_openai_dev/embedding_request_formatted_5", basename+"_embedding.jsonl")
             upload_embedding_batch(filename, prefix, output_dir)
 
     if embeddings_check:
-        format_dir = "/home/caceves/su_openai_dev/embedding_request_formatted"
+        format_dir = "/home/caceves/su_openai_dev/embedding_request_formatted_5"
         all_batches = [os.path.join(format_dir, x) for x in os.listdir(format_dir) if x.startswith(database_name)]
         for batch in all_batches:
             basename = os.path.basename(batch).replace("_embedding.jsonl", "_vectors")
