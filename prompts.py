@@ -9,17 +9,18 @@ load_dotenv('.env')
 apikey = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 
-def one_shot(disease, drug, model, predicates):
+def one_shot(disease, drug, model, predicates, categories):
     prompt =[
           {"role": "system", "content":
-        """You will be given a drug and the disease it treats. Please do the following, and return the results of each step: 1. Describe the mechanism of action through which the drug treats the disease in paragraph form. 2. Perform named entity recognition and return a Pythonic list of all the biological and chemical entities. Be as comprehensive as possible. 3. Create up to five directed pathways which describe the mechanism of action by which the drug treats the disease using the named entities and the provided list of edge descriptors. Every pathway must start with the drug and end with the disease. Pathways can contain between two and ten entities and should be as descriptive and detailed as possible. Descriptors describe the relationships between adjacent edges. Descriptors must be chosen from the provided list. Entities may only appear once per pathway.
+        """You will be given a drug and the disease it treats. Please do the following, and return the results of each step: 1. Describe the mechanism of action through which the drug treats the disease in paragraph form. 2. Perform named entity recognition and return a Pythonic list of all the biological and chemical entities. Be as comprehensive as possible. 3. Determine the category each entity belongs in an return a Pythonic list. The category list order should match the entity list order from step two. Use only the provided categories. 4. Create up to five directed pathways which describe the mechanism of action by which the drug treats the disease using the named entities and the provided list of edge descriptors. Every pathway must start with the drug and end with the disease. Pathways can contain between two and ten entities and should be as descriptive and detailed as possible. Descriptors describe the relationships between adjacent edges. Descriptors must be chosen from the provided list. Entities may only appear once per pathway.
 
 The results should be in the following json format with no additional commentary or formatting.
 {"paragraph": "text here",
 "entities": ["entity1", "entity2", "entity3", "entity4", "entity5", "entity6", "entity7", "entity8", "entity9", "entity10"],
+"categories": ["category3", "category3", "category12", "category11", ""category10", "category1", "category2", "category5", "category1", "category9"],
 "pathways":  ["drug -> descriptor1 -> entity1 -> descriptor30 -> disease",  "drug -> descriptor13 -> entity2 -> descriptor45 -> entity3 -> descriptor15 ->disease", "drug -> descriptor3 -> entity8 -> descriptor3 -> entity10 -> descriptor21 -> entity4 -> descriptor12 -> entity3 -> descriptor5 -> entity7 -> descriptor33 -> disease"]
 }"""},
-          {"role": "user", "content": "Disease:%s\nDrug: %s\nEdge Descriptors:%s"%(disease, drug, predicates)}]
+          {"role": "user", "content": "Disease:%s\nDrug: %s\nCategories:%s\nEdge Descriptors:%s"%(disease, drug, categories, predicates)}]
     completion = client.chat.completions.create(
     model="%s"%model,
     messages=prompt,
